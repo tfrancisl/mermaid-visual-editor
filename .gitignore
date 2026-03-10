@@ -1,0 +1,23 @@
+# JS
+node_modules/
+dist/
+.vite/
+
+# Rust / Cargo
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Nix
+result
+result-*
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Claude Code project memory (user-specific)
+.claude/
+
+# OS
+.DS_Store

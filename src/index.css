@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-surface: #313244;
+  --border: #45475a;
+  --text-primary: #cdd6f4;
+  --text-muted: #6c7086;
+  --accent: #89b4fa;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Shared form input classes used in canvas form editors */
+.field-input {
+  @apply bg-[var(--bg-surface)] border border-[var(--border)] rounded px-2 py-0.5 text-xs outline-none focus:border-[var(--accent)] text-[var(--text-primary)] w-full;
+}
+.field-select {
+  @apply bg-[var(--bg-surface)] border border-[var(--border)] rounded px-1 py-0.5 text-xs text-[var(--text-primary)] w-full outline-none focus:border-[var(--accent)];
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface);
+  border-radius: 3px;
+}
