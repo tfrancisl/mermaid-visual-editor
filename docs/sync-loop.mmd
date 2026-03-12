@@ -1,0 +1,23 @@
+sequenceDiagram
+    actor User
+    participant Monaco as Monaco Editor
+    participant Parser as parse()
+    participant Canvas as Canvas Component
+    participant Buffer as ChangeBuffer
+    participant Serializer as serialize()
+    participant Preview as Mermaid.js Preview
+
+    Note over User,Preview: Direction 1 — Text → Visual (300 ms debounce)
+    User->>Monaco: types / edits Mermaid source
+    Monaco->>Parser: source string
+    Parser->>Canvas: DiagramModel (nodes + edges)
+    Canvas-->>Canvas: suppressSyncRef = true
+    Canvas->>Preview: re-render SVG
+
+    Note over User,Preview: Direction 2 — Visual → Text (1.5 s / ⌘↵)
+    User->>Canvas: drags node / adds edge / edits label
+    Canvas->>Buffer: push(mutation)
+    Buffer->>Serializer: flush()
+    Serializer-->>Canvas: ownUpdateRef = true
+    Serializer->>Monaco: updated Mermaid source
+    Monaco->>Preview: re-render SVG

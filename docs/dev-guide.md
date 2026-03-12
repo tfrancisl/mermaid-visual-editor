@@ -67,8 +67,16 @@ mermaid-visual-editor/
 │       capabilities/
 │       └── default.json         # Tauri v2 permission declarations
 │
+├── examples/
+│   ├── flowchart.mmd            # All 8 node shapes + 4 edge styles + subgraphs
+│   ├── sequence.mmd             # Participants, loops, alt/else, notes
+│   ├── gantt.mmd                # Task statuses, sections, milestones
+│   └── pie.mmd                  # showData flag + realistic breakdown
+│
 └── docs/
     ├── architecture.md          # Design overview and buffered sync model
+    ├── component-graph.mmd      # System architecture as Mermaid flowchart
+    ├── sync-loop.mmd            # Bidirectional sync sequence diagram
     ├── toolchain-decision.md    # ADR: why Tauri over Electron / web
     └── dev-guide.md             # This file
 ```

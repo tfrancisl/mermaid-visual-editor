@@ -1,0 +1,17 @@
+gantt
+    title Mermaid Visual Editor — Development Phases
+    dateFormat  YYYY-MM-DD
+    section Foundation
+        Scaffold (Tauri + Vite + React)    :done,    p0,  2025-01-01, 7d
+        Core editor + file I/O             :done,    p1,  after p0,  14d
+    section Visual Editing
+        React Flow canvas                  :done,    p2a, after p1,  10d
+        Form editors (sequence/gantt/pie)  :done,    p2b, after p2a,  7d
+    section Polish
+        Multi-tab + exports                :done,    p3,  after p2b,  7d
+        Keyboard shortcuts                 :done,    p3b, after p3,   3d
+    section Future
+        Workspace file explorer            :active,  p4,  after p3b, 14d
+        AI integration (Claude API)        :         p5,  after p4,  21d
+        Class diagram support              :crit,    p6,  after p5,  14d
+        v1.0 release                       :milestone, v1, after p6,  0d

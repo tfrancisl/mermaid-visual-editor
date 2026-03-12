@@ -1,0 +1,21 @@
+flowchart TB
+    subgraph Frontend ["Web Frontend (React + TypeScript)"]
+        Monaco["Monaco Editor\n(Mermaid source)"]
+        Canvas["Visual Canvas\n(React Flow / Form editor)"]
+        Preview["Mermaid.js Preview\n(Live SVG render)"]
+        Parser["parse()"]
+        Serializer["serialize()"]
+        Buffer["ChangeBuffer\n(mutation queue)"]
+    end
+    subgraph Backend ["Rust Backend (Tauri v2)"]
+        FS["File System\n(open / save .mmd)"]
+        mmdc["mmdc subprocess\n(PNG / PDF export)"]
+    end
+    Monaco -->|"source — 300 ms debounce"| Parser
+    Parser -->|"DiagramModel"| Canvas
+    Monaco -->|"source — 300 ms debounce"| Preview
+    Canvas -->|"mutations"| Buffer
+    Buffer -->|"flush — 1.5 s / ⌘↵"| Serializer
+    Serializer -->|"Mermaid source"| Monaco
+    Monaco <-->|"Tauri IPC: open_file / save_file"| FS
+    Canvas <-->|"Tauri IPC: export_diagram"| mmdc

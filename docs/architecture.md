@@ -6,29 +6,31 @@
 
 A Tauri v2 desktop application for visually editing Mermaid diagrams.
 
+```mermaid
+flowchart TB
+    subgraph Frontend ["Web Frontend (React + TypeScript)"]
+        Monaco["Monaco Editor\n(Mermaid source)"]
+        Canvas["Visual Canvas\n(React Flow / Form editor)"]
+        Preview["Mermaid.js Preview\n(Live SVG render)"]
+        Parser["parse()"]
+        Serializer["serialize()"]
+        Buffer["ChangeBuffer\n(mutation queue)"]
+    end
+    subgraph Backend ["Rust Backend (Tauri v2)"]
+        FS["File System\n(open / save .mmd)"]
+        mmdc["mmdc subprocess\n(PNG / PDF export)"]
+    end
+    Monaco -->|"source — 300 ms debounce"| Parser
+    Parser -->|"DiagramModel"| Canvas
+    Monaco -->|"source — 300 ms debounce"| Preview
+    Canvas -->|"mutations"| Buffer
+    Buffer -->|"flush — 1.5 s / ⌘↵"| Serializer
+    Serializer -->|"Mermaid source"| Monaco
+    Monaco <-->|"Tauri IPC: open_file / save_file"| FS
+    Canvas <-->|"Tauri IPC: export_diagram"| mmdc
 ```
-┌────────────────────────────────────────────────────────────────┐
-│              Web Frontend (React + TypeScript)                  │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ Monaco Editor│  │  React Flow  │  │   Mermaid.js Preview │  │
-│  │ Mermaid text │  │ Visual canvas│  │   Live SVG render    │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────────────┘  │
-│         │  parse ↓        │ mutate ↓           ↑ render         │
-│         └──────────► Change Buffer ◄────────────┘               │
-│                           │ flush/commit                        │
-│                           ↓                                      │
-│                    Serialize → source                           │
-└─────────────────────────────────────────────────────────────────┘
-                     ↕ Tauri IPC (typed commands)
-┌────────────────────────────────────────────────────────────────┐
-│              Rust Backend (Tauri)                               │
-│                                                                  │
-│   File System I/O      Export (mmdc)      Window management    │
-│   open/save .mmd       PNG / PDF via       OS native chrome    │
-│                        subprocess                               │
-└────────────────────────────────────────────────────────────────┘
-```
+
+_Open in editor: [`docs/component-graph.mmd`](component-graph.mmd)_
 
 ## Buffered Sync Model
 
@@ -47,6 +49,34 @@ The key design insight: changes are buffered rather than continuously synced.
 5. Monaco editor updates to the new source
 
 This avoids the hardest problem (perfect round-trip AST parsing for all diagram types) and gives a natural commit UX.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Monaco as Monaco Editor
+    participant Parser as parse()
+    participant Canvas as Canvas Component
+    participant Buffer as ChangeBuffer
+    participant Serializer as serialize()
+    participant Preview as Mermaid.js Preview
+
+    Note over User,Preview: Direction 1 — Text → Visual (300 ms debounce)
+    User->>Monaco: types / edits Mermaid source
+    Monaco->>Parser: source string
+    Parser->>Canvas: DiagramModel (nodes + edges)
+    Canvas-->>Canvas: suppressSyncRef = true
+    Canvas->>Preview: re-render SVG
+
+    Note over User,Preview: Direction 2 — Visual → Text (1.5 s / ⌘↵)
+    User->>Canvas: drags node / adds edge / edits label
+    Canvas->>Buffer: push(mutation)
+    Buffer->>Serializer: flush()
+    Serializer-->>Canvas: ownUpdateRef = true
+    Serializer->>Monaco: updated Mermaid source
+    Monaco->>Preview: re-render SVG
+```
+
+_Open in editor: [`docs/sync-loop.mmd`](sync-loop.mmd)_
 
 ## Directory Structure
 
@@ -80,9 +110,9 @@ docs/
 | Phase | Status | Description |
 |---|---|---|
 | 0 | Done | Scaffold: Tauri + Vite + React + Monaco + Tailwind |
-| 1 | Pending | Core editor: Monaco + Mermaid preview + file I/O |
-| 2 | Pending | Visual editing: React Flow canvas + change buffer |
-| 3 | Pending | Export (PNG/PDF), tabs, polish |
+| 1 | Done | Core editor: Monaco + Mermaid preview + file I/O |
+| 2 | Done | Visual editing: React Flow canvas + form editors (sequence/gantt/pie) |
+| 3 | Done | Multi-tab, export (PNG/PDF/SVG), keyboard shortcuts |
 | 4 | Deferred | AI integration (Claude API) |
 
 ## Open Questions

@@ -1,0 +1,24 @@
+sequenceDiagram
+    actor User
+    participant App as Mermaid Editor
+    participant FS as File System
+    participant Parser
+
+    User->>App: File → Open (⌘O)
+    App->>FS: open dialog
+    FS-->>App: path + content
+    App->>Parser: parse(source)
+    Parser-->>App: DiagramModel
+
+    loop auto-sync every 1.5 s
+        App->>App: serialize(mutations)
+        App-->>User: Monaco updates
+    end
+
+    alt valid diagram
+        App-->>User: renders preview SVG
+    else parse error
+        App-->>User: shows error message in preview
+    end
+
+    Note right of User: ⌘↵ forces immediate sync

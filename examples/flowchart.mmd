@@ -1,0 +1,16 @@
+flowchart LR
+    subgraph Input
+        A([Start]) -->|open link| B[Rectangle]
+        B -.->|dotted| C(Rounded)
+    end
+    subgraph Logic
+        C ==>|thick| D{Decision}
+        D -->|yes| E((Circle))
+        D -->|no| F>Asymmetric]
+    end
+    subgraph Output
+        E --> G[[Subroutine]]
+        G --> H[(Cylinder / DB)]
+        H --> I([End])
+        F --- I
+    end
