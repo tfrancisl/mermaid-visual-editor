@@ -30,7 +30,7 @@ export default function Canvas({ source, onSourceChange }: CanvasProps) {
       <p className="text-sm font-medium text-[var(--text-muted)]">Visual editing not yet supported</p>
       <p className="text-xs text-[var(--text-muted)] max-w-xs opacity-60">
         <code className="font-mono">{type}</code> diagrams will get a visual editor in a future phase.
-        Edit the source directly in Editor mode.
+        Edit the source directly in the editor pane.
       </p>
     </div>
   );

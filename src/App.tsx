@@ -1,13 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import mermaid from "mermaid";
 import Editor, { type CursorPosition } from "./components/Editor";
-import Preview from "./components/Preview";
 import Canvas from "./components/Canvas";
 import Resizable from "./components/Resizable";
 import DiagramTypePicker from "./components/DiagramTypePicker";
 import { detectDiagramType } from "./lib/parsers";
 import { openMmdFile, saveMmdFile, saveMmdFileAs, basename } from "./lib/fileOps";
 import { getTemplate } from "./lib/templates";
+
+// Initialize mermaid for on-demand SVG export
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "dark",
+  securityLevel: "loose",
+  fontFamily: "ui-sans-serif, system-ui, sans-serif",
+});
 
 // ---------------------------------------------------------------------------
 // Tab model
@@ -30,17 +38,17 @@ const DEFAULT_SOURCE = getTemplate("flowchart");
 // Types
 // ---------------------------------------------------------------------------
 
-type Panel = "editor" | "canvas" | "preview";
 type ExportFormat = "png" | "pdf";
 
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
+let exportIdCounter = 0;
+
 export default function App() {
   const [tabs, setTabs] = useState<Tab[]>(() => [makeTab(DEFAULT_SOURCE)]);
   const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
-  const [activePanel, setActivePanel] = useState<Panel>("editor");
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, col: 1 });
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -53,15 +61,11 @@ export default function App() {
   // Shortcuts overlay
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  const currentSvgRef = useRef<string>("");
-
   // Stable refs for keyboard handler
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
-  const activePanelRef = useRef(activePanel);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
-  useEffect(() => { activePanelRef.current = activePanel; }, [activePanel]);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const diagramType = detectDiagramType(activeTab.source);
@@ -141,13 +145,7 @@ export default function App() {
   // Source changes
   // ---------------------------------------------------------------------------
 
-  const handleEditorChange = useCallback((value: string) => {
-    setTabs((prev) =>
-      prev.map((t) => (t.id === activeTabIdRef.current ? { ...t, source: value, unsaved: true } : t))
-    );
-  }, []);
-
-  const handleCanvasSourceChange = useCallback((value: string) => {
+  const handleSourceChange = useCallback((value: string) => {
     setTabs((prev) =>
       prev.map((t) => (t.id === activeTabIdRef.current ? { ...t, source: value, unsaved: true } : t))
     );
@@ -191,10 +189,15 @@ export default function App() {
   // Export
   // ---------------------------------------------------------------------------
 
-  function handleExportSVG() {
-    const svg = currentSvgRef.current;
-    if (!svg) return;
-    downloadBlob(new Blob([svg], { type: "image/svg+xml" }), displayName.replace(/\.\w+$/, "") + ".svg");
+  async function handleExportSVG() {
+    const trimmed = activeTab.source.trim();
+    if (!trimmed) return;
+    try {
+      const { svg } = await mermaid.render(`export-svg-${++exportIdCounter}`, trimmed);
+      downloadBlob(new Blob([svg], { type: "image/svg+xml" }), displayName.replace(/\.\w+$/, "") + ".svg");
+    } catch {
+      // Source is likely invalid — nothing to export
+    }
   }
 
   async function handleExportBinary(format: ExportFormat) {
@@ -265,11 +268,6 @@ export default function App() {
         setActiveTabId(t[(idx - 1 + t.length) % t.length].id);
         return;
       }
-      if (mod && e.key === "`") {
-        e.preventDefault();
-        setActivePanel((p) => (p === "canvas" ? "editor" : p === "editor" ? "canvas" : p));
-        return;
-      }
       if (e.key === "?" && !mod && !e.altKey) {
         if (e.target instanceof Element && e.target.closest(".monaco-editor")) return;
         setShowShortcuts((s) => !s);
@@ -287,8 +285,6 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <Toolbar
-        activePanel={activePanel}
-        onPanelChange={setActivePanel}
         onOpen={handleOpen}
         onSave={handleSave}
         onSaveAs={handleSaveAs}
@@ -307,23 +303,10 @@ export default function App() {
       />
 
       <main className="flex flex-1 min-h-0 overflow-hidden">
-        {activePanel === "editor" && (
-          <Resizable defaultRatio={0.5} storageKey="editor-split" className="flex-1">
-            <Editor key={activeTab.id} value={activeTab.source} onChange={handleEditorChange} onCursorChange={setCursor} />
-            <Preview source={activeTab.source} onSvgChange={(svg) => { currentSvgRef.current = svg; }} />
-          </Resizable>
-        )}
-        {activePanel === "canvas" && (
-          <Resizable defaultRatio={0.6} storageKey="canvas-split" className="flex-1">
-            <Canvas source={activeTab.source} onSourceChange={handleCanvasSourceChange} />
-            <CanvasSourcePane key={activeTab.id} source={activeTab.source} onChange={handleEditorChange} onCursorChange={setCursor} />
-          </Resizable>
-        )}
-        {activePanel === "preview" && (
-          <div className="flex-1 overflow-auto">
-            <Preview source={activeTab.source} onSvgChange={(svg) => { currentSvgRef.current = svg; }} />
-          </div>
-        )}
+        <Resizable defaultRatio={0.6} storageKey="split" className="flex-1">
+          <Canvas source={activeTab.source} onSourceChange={handleSourceChange} />
+          <SourcePane key={activeTab.id} source={activeTab.source} onChange={handleSourceChange} onCursorChange={setCursor} />
+        </Resizable>
       </main>
 
       <StatusBar
@@ -362,10 +345,10 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Canvas source pane
+// Source editor pane (right side)
 // ---------------------------------------------------------------------------
 
-function CanvasSourcePane({ source, onChange, onCursorChange }: {
+function SourcePane({ source, onChange, onCursorChange }: {
   source: string; onChange: (v: string) => void; onCursorChange: (p: CursorPosition) => void;
 }) {
   return (
@@ -385,10 +368,9 @@ function CanvasSourcePane({ source, onChange, onCursorChange }: {
 // ---------------------------------------------------------------------------
 
 function Toolbar({
-  activePanel, onPanelChange, onOpen, onSave, onSaveAs,
+  onOpen, onSave, onSaveAs,
   onExportSVG, onExportBinary, exportingFormat, exportError, onClearExportError,
 }: {
-  activePanel: Panel; onPanelChange: (p: Panel) => void;
   onOpen: () => void; onSave: () => void; onSaveAs: () => void;
   onExportSVG: () => void; onExportBinary: (f: ExportFormat) => void;
   exportingFormat: ExportFormat | null; exportError: string | null;
@@ -398,13 +380,13 @@ function Toolbar({
 
   return (
     <header className="flex items-center gap-1 px-2 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0 relative z-10">
-      <TBtn onClick={onOpen}    label="Open…"    kbd="⌘O" />
-      <TBtn onClick={onSave}    label="Save"     kbd="⌘S" />
-      <TBtn onClick={onSaveAs}  label="Save As…" kbd="⌘⇧S" />
+      <TBtn onClick={onOpen}    label="Open..."    kbd="Ctrl+O" />
+      <TBtn onClick={onSave}    label="Save"     kbd="Ctrl+S" />
+      <TBtn onClick={onSaveAs}  label="Save As..." kbd="Ctrl+Shift+S" />
       <Divider />
 
       <div className="relative">
-        <TBtn onClick={() => { setExportOpen((o) => !o); onClearExportError(); }} label="Export ▾" />
+        <TBtn onClick={() => { setExportOpen((o) => !o); onClearExportError(); }} label="Export &#x25BE;" />
         {exportOpen && (
           <>
             <div className="fixed inset-0" onClick={() => setExportOpen(false)} />
@@ -423,19 +405,6 @@ function Toolbar({
             </div>
           </>
         )}
-      </div>
-
-      <div className="flex items-center ml-auto bg-[var(--bg-primary)] rounded border border-[var(--border)] overflow-hidden">
-        {(["editor", "canvas", "preview"] as Panel[]).map((p) => (
-          <button key={p} onClick={() => onPanelChange(p)}
-            className={`px-3 py-1 text-xs capitalize transition-colors ${
-              activePanel === p
-                ? "bg-[var(--accent)] text-[var(--bg-primary)] font-medium"
-                : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            }`}>
-            {p}
-          </button>
-        ))}
       </div>
     </header>
   );
@@ -470,16 +439,16 @@ function TabBar({ tabs, activeTabId, onActivate, onClose, onNewTab }: {
             <button
               onClick={(e) => { e.stopPropagation(); onClose(tab.id); }}
               className="opacity-50 hover:opacity-100 hover:text-red-400 transition-opacity ml-0.5"
-            >×</button>
+            >&times;</button>
           </div>
         );
       })}
 
-      {/* New tab button — opens type picker */}
+      {/* New tab button - opens type picker */}
       <button
         onClick={onNewTab}
         className="px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] rounded-t transition-colors shrink-0 self-end mb-px"
-        title="New tab — choose diagram type (⌘N for flowchart)"
+        title="New tab - choose diagram type (Ctrl+N for flowchart)"
       >+</button>
     </div>
   );
@@ -502,11 +471,11 @@ function StatusBar({ cursor, diagramType, unsaved, onTypeClick, onShortcutsClick
         className="text-xs text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors flex items-center gap-1"
         title="Switch diagram type"
       >
-        ⬡ {diagramType} ▾
+        &#x2B21; {diagramType} &#x25BE;
       </button>
       <Sep />
       <span className={`text-xs ${unsaved ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}>
-        {unsaved ? "● unsaved" : "saved"}
+        {unsaved ? "&#x25CF; unsaved" : "saved"}
       </span>
       <button
         onClick={onShortcutsClick}
@@ -523,21 +492,20 @@ function StatusBar({ cursor, diagramType, unsaved, onTypeClick, onShortcutsClick
 
 const SHORTCUTS = [
   { group: "File", items: [
-    { key: "⌘ N",       desc: "New flowchart tab" },
-    { key: "⌘ O",       desc: "Open file" },
-    { key: "⌘ S",       desc: "Save" },
-    { key: "⌘ ⇧ S",    desc: "Save As" },
-    { key: "⌘ W",       desc: "Close tab" },
+    { key: "Ctrl N",       desc: "New flowchart tab" },
+    { key: "Ctrl O",       desc: "Open file" },
+    { key: "Ctrl S",       desc: "Save" },
+    { key: "Ctrl Shift S", desc: "Save As" },
+    { key: "Ctrl W",       desc: "Close tab" },
   ]},
   { group: "Navigation", items: [
-    { key: "⌘ Tab",     desc: "Next tab" },
-    { key: "⌘ ⇧ Tab",  desc: "Previous tab" },
-    { key: "⌘ `",       desc: "Toggle Editor / Canvas" },
+    { key: "Ctrl Tab",       desc: "Next tab" },
+    { key: "Ctrl Shift Tab", desc: "Previous tab" },
   ]},
   { group: "Canvas", items: [
-    { key: "⌘ Enter",   desc: "Sync canvas now" },
-    { key: "Esc",       desc: "Return to Select tool" },
-    { key: "⌫ / Del",  desc: "Delete selected node / edge" },
+    { key: "Ctrl Enter", desc: "Sync canvas now" },
+    { key: "Esc",        desc: "Return to Select tool" },
+    { key: "Bksp / Del", desc: "Delete selected node / edge" },
   ]},
   { group: "Other", items: [
     { key: "?",         desc: "Toggle this panel" },
@@ -549,7 +517,7 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
     <div className="fixed bottom-8 right-4 w-72 bg-[var(--bg-secondary)] border border-[var(--border)] rounded shadow-xl z-50 text-xs">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
         <span className="font-semibold text-[var(--text-primary)]">Keyboard Shortcuts</span>
-        <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">×</button>
+        <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">&times;</button>
       </div>
       <div className="p-3 flex flex-col gap-3 max-h-80 overflow-y-auto">
         {SHORTCUTS.map((group) => (
@@ -589,11 +557,11 @@ function ExportItem({ label, sublabel, spinning, onClick }: {
       className="w-full text-left px-3 py-1.5 text-xs flex items-center justify-between hover:bg-[var(--bg-surface)] text-[var(--text-primary)] transition-colors">
       <span>{label}</span>
       <span className={`text-[10px] ${spinning ? "text-[var(--accent)] animate-pulse" : "text-[var(--text-muted)]"}`}>
-        {spinning ? "generating…" : sublabel}
+        {spinning ? "generating..." : sublabel}
       </span>
     </button>
   );
 }
 
 function Divider() { return <div className="w-px h-4 bg-[var(--border)] mx-1" />; }
-function Sep() { return <span className="text-[var(--border)] text-xs">│</span>; }
+function Sep() { return <span className="text-[var(--border)] text-xs">&#x2502;</span>; }
