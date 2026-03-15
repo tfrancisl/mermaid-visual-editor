@@ -35,7 +35,7 @@ describe("serializeFlowchart", () => {
       rawLines: [],
     };
     const out = serialize(model);
-    expect(out).toContain('"yes"');
+    expect(out).toContain("|yes|");
   });
 
   it("serializes all edge styles", () => {

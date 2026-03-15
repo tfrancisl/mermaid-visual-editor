@@ -3,7 +3,7 @@ import { detectDiagramType, parse } from "../parsers";
 import type {
   GraphModel, SequenceModel, GanttModel, PieModel,
   ClassModel, StateModel, ERModel, MindmapModel,
-  JourneyModel, TimelineModel, QuadrantModel,
+  BlockModel, JourneyModel, TimelineModel, QuadrantModel,
   XYChartModel, GitGraphModel, RequirementModel,
 } from "../parsers";
 
@@ -27,6 +27,7 @@ describe("detectDiagramType", () => {
     ["quadrantChart\n  title X", "quadrantChart"],
     ["xychart-beta\n  title X", "xychart-beta"],
     ["journey\n  title X", "journey"],
+    ["block-beta\n  columns 3", "block-beta"],
     ["requirementDiagram\n  requirement foo", "requirementDiagram"],
   ];
 
@@ -257,17 +258,42 @@ describe("parseClass", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseState", () => {
-  it("parses states and transitions", () => {
+  it("parses states and transitions with [*] markers", () => {
     const source = `stateDiagram-v2
+    [*] --> Idle
     Idle --> Processing : start
-    Processing --> Done : complete`;
+    Processing --> [*]`;
     const model = parse(source) as StateModel;
     expect(model.type).toBe("stateDiagram-v2");
     expect(model.states.length).toBeGreaterThanOrEqual(2);
-    expect(model.transitions).toHaveLength(2);
-    expect(model.transitions[0].label).toBe("start");
-    expect(model.transitions[0].source).toBe("Idle");
-    expect(model.transitions[0].target).toBe("Processing");
+    expect(model.transitions).toHaveLength(3);
+    expect(model.transitions[1].label).toBe("start");
+  });
+
+  it("marks [*] target as end", () => {
+    const source = `stateDiagram-v2
+    Done --> [*]`;
+    const model = parse(source) as StateModel;
+    const endState = model.states.find((s) => s.id === "[*]");
+    expect(endState?.kind).toBe("end");
+  });
+
+  it("parses state labels", () => {
+    const source = `stateDiagram-v2
+    state "Waiting" as Idle
+    Idle --> Processing`;
+    const model = parse(source) as StateModel;
+    const idle = model.states.find((s) => s.id === "Idle");
+    expect(idle?.label).toBe("Waiting");
+  });
+
+  it("parses choice/fork/join markers", () => {
+    const source = `stateDiagram-v2
+    state check <<choice>>
+    Idle --> check`;
+    const model = parse(source) as StateModel;
+    const checkState = model.states.find((s) => s.id === "check");
+    expect(checkState?.kind).toBe("choice");
   });
 
   it("parses transition labels", () => {
@@ -310,10 +336,8 @@ describe("parseER", () => {
 
 describe("parseMindmap", () => {
   it("parses tree from indentation", () => {
-    // Note: mindmap root nodes include shape syntax in label since
-    // detectMindmapShape only works on pure shape strings (no prefix)
     const source = `mindmap
-    ((Project))
+    root((Project))
         Planning
             Requirements
         Development`;
@@ -345,10 +369,26 @@ describe("parseMindmap", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseBlock", () => {
-  // Note: block-beta is not in detectDiagramType regex, so parse() returns RawModel.
-  // We test that detectDiagramType returns "unknown" for it.
-  it("detectDiagramType returns unknown for block-beta", () => {
-    expect(detectDiagramType("block-beta\n  columns 3")).toBe("unknown");
+  it("parses columns and blocks", () => {
+    const source = `block-beta
+    columns 3
+    A["Block A"]
+    B["Block B"]:2`;
+    const model = parse(source) as BlockModel;
+    expect(model.type).toBe("block-beta");
+    expect(model.columns).toBe(3);
+    expect(model.blocks).toHaveLength(2);
+    expect(model.blocks[1].span).toBe(2);
+  });
+
+  it("parses arrows", () => {
+    const source = `block-beta
+    A["A"]
+    B["B"]
+    A --> B`;
+    const model = parse(source) as BlockModel;
+    expect(model.arrows).toHaveLength(1);
+    expect(model.arrows[0]).toMatchObject({ source: "A", target: "B" });
   });
 });
 

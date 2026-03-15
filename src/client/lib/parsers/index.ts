@@ -384,7 +384,7 @@ export type DiagramModel = GraphModel | SequenceModel | GanttModel | PieModel | 
 export function detectDiagramType(source: string): string {
   const first = source.trim().split("\n")[0].trim();
   const m = first.match(
-    /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|requirementDiagram|journey|C4\w+)/
+    /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|block-beta|requirementDiagram|journey|C4\w+)/
   );
   return m ? m[1] : "unknown";
 }
@@ -636,21 +636,21 @@ function classRelType(arrow: string): ClassRelationType {
 
 function parseClassMember(line: string): { member?: ClassMember; method?: ClassMethod } {
   const t = line.trim();
-  const vis = ("+−-#~".includes(t[0]) ? t[0] : "") as ClassVisibility;
+  const vis = ("+-#~".includes(t[0]) ? t[0] : "") as ClassVisibility;
   const rest = vis ? t.slice(1).trim() : t;
 
   // Method: name(params) returnType  or  name(params)
   const mm = rest.match(/^(\w+)\(([^)]*)\)\s*(.*)$/);
   if (mm) {
-    return { method: { visibility: vis === "−" ? "-" : vis, name: mm[1], params: mm[2].trim(), returnType: mm[3].trim() } };
+    return { method: { visibility: vis, name: mm[1], params: mm[2].trim(), returnType: mm[3].trim() } };
   }
 
   // Member: Type name  or  name
   const parts = rest.split(/\s+/);
   if (parts.length >= 2) {
-    return { member: { visibility: vis === "−" ? "-" : vis, type: parts[0], name: parts.slice(1).join(" ") } };
+    return { member: { visibility: vis, type: parts[0], name: parts.slice(1).join(" ") } };
   }
-  return { member: { visibility: vis === "−" ? "-" : vis, type: "", name: rest } };
+  return { member: { visibility: vis, type: "", name: rest } };
 }
 
 function parseClass(source: string): ClassModel {
@@ -764,10 +764,29 @@ function parseState(source: string): StateModel {
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line || line.startsWith("%%") || line.startsWith("state ") || line === "end" || line === "{" || line === "}") continue;
+    if (!line || line.startsWith("%%") || line === "end" || line === "{" || line === "}") continue;
 
-    // Transition: State1 --> State2 : label
-    const tm = line.match(/^(\[?\*?\]?[\w-]+\]?)\s*-->\s*(\[?\*?\]?[\w-]+\]?)\s*(?::\s*(.+))?$/);
+    // State label: state "Label" as StateName
+    const slm = line.match(/^state\s+"([^"]+)"\s+as\s+(\w+)$/);
+    if (slm) {
+      const node = ensureState(slm[2]);
+      node.label = slm[1];
+      continue;
+    }
+
+    // Choice/fork/join markers: state Name <<choice>>
+    const choiceM = line.match(/^state\s+(\w+)\s+<<(choice|fork|join)>>$/);
+    if (choiceM) {
+      const node = ensureState(choiceM[1]);
+      node.kind = choiceM[2] as "choice" | "fork" | "join";
+      continue;
+    }
+
+    // Skip other state declarations (e.g. "state Name {")
+    if (line.startsWith("state ")) continue;
+
+    // Transition: State1 --> State2 : label (supports [*] start/end markers)
+    const tm = line.match(/^(\[\*\]|[\w-]+)\s*-->\s*(\[\*\]|[\w-]+)\s*(?::\s*(.+))?$/);
     if (tm) {
       const srcId = tm[1];
       const tgtId = tm[2];
@@ -782,21 +801,6 @@ function parseState(source: string): StateModel {
         label: tm[3]?.trim(),
       });
       continue;
-    }
-
-    // State label: state "Label" as StateName
-    const slm = line.match(/^state\s+"([^"]+)"\s+as\s+(\w+)$/);
-    if (slm) {
-      const node = ensureState(slm[2]);
-      node.label = slm[1];
-      continue;
-    }
-
-    // Choice/fork/join markers
-    const choiceM = line.match(/^state\s+(\w+)\s+<<(choice|fork|join)>>$/);
-    if (choiceM) {
-      const node = ensureState(choiceM[1]);
-      node.kind = choiceM[2] as "choice" | "fork" | "join";
     }
   }
 
@@ -884,23 +888,26 @@ function parseER(source: string): ERModel {
 // ---------------------------------------------------------------------------
 
 function detectMindmapShape(raw: string): { label: string; shape: MindmapShape } {
+  // Strip optional id prefix: "root((Label))" → "((Label))"
+  const stripped = raw.replace(/^\w+(?=[\[\({\)>])/, "");
+
   // ((circle))
-  let m = raw.match(/^\(\((.+)\)\)$/);
+  let m = stripped.match(/^\(\((.+)\)\)$/);
   if (m) return { label: m[1], shape: "circle" };
   // (rounded)
-  m = raw.match(/^\((.+)\)$/);
+  m = stripped.match(/^\((.+)\)$/);
   if (m) return { label: m[1], shape: "rounded" };
   // [rect]
-  m = raw.match(/^\[(.+)\]$/);
+  m = stripped.match(/^\[(.+)\]$/);
   if (m) return { label: m[1], shape: "rect" };
   // ))bang((
-  m = raw.match(/^\)\)(.+)\(\($/);
+  m = stripped.match(/^\)\)(.+)\(\($/);
   if (m) return { label: m[1], shape: "bang" };
   // )cloud(
-  m = raw.match(/^\)(.+)\($/);
+  m = stripped.match(/^\)(.+)\($/);
   if (m) return { label: m[1], shape: "cloud" };
   // {{hexagon}}
-  m = raw.match(/^\{\{(.+)\}\}$/);
+  m = stripped.match(/^\{\{(.+)\}\}$/);
   if (m) return { label: m[1], shape: "hexagon" };
   return { label: raw, shape: "default" };
 }

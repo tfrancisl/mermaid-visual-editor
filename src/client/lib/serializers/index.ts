@@ -1,7 +1,7 @@
 import type {
   DiagramModel, GraphModel, GraphNode, GraphEdge,
   SequenceModel, GanttModel, PieModel,
-  ClassModel, ClassNode, ClassRelation, ClassRelationType,
+  ClassModel, ClassRelationType,
   StateModel, ERModel,
   MindmapModel, MindmapNode, MindmapShape,
   BlockModel, BlockItem,
@@ -68,7 +68,7 @@ function serializeFlowchart(model: GraphModel): string {
     const src = nodeMap.get(edge.source) ?? { id: edge.source, label: edge.source, shape: "rect" as const };
     const tgt = nodeMap.get(edge.target) ?? { id: edge.target, label: edge.target, shape: "rect" as const };
     const arrow = edgeArrow(edge);
-    const label = edge.label ? `|"${edge.label}"| ` : " ";
+    const label = edge.label ? `|${edge.label}| ` : " ";
     lines.push(`    ${nodeSpec(src)} ${arrow}${label}${nodeSpec(tgt)}`);
   }
 

@@ -23,10 +23,9 @@ function stripRawLines(obj: unknown): unknown {
   return obj;
 }
 
-// Types that have both a parser and a serializer.
-// "flowchart" excluded: serializer wraps edge labels in extra quotes (known issue).
-// "block-beta" excluded: not in detectDiagramType regex.
+// Types that have both a parser and a serializer
 const roundTripTypes = [
+  "flowchart",
   "graph",
   "sequenceDiagram",
   "gantt",
@@ -35,6 +34,7 @@ const roundTripTypes = [
   "stateDiagram-v2",
   "erDiagram",
   "mindmap",
+  "block-beta",
 ];
 
 describe("round-trip: parse → serialize → parse", () => {
