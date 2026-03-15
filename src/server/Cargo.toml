@@ -3,6 +3,10 @@ name = "mermaid-visual-editor-server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "mermaid_visual_editor_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "server"
 path = "src/main.rs"
@@ -21,3 +25,7 @@ rust-embed = { version = "8", features = ["compression"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
 mime_guess = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+urlencoding = "2"

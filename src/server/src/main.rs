@@ -1,10 +1,5 @@
-mod export;
-mod files;
-mod routes;
-mod state;
-mod watch;
-
 use clap::Parser;
+use mermaid_visual_editor_server::{routes, state};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
