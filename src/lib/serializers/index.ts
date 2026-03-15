@@ -1,7 +1,11 @@
 import type {
   DiagramModel, GraphModel, GraphNode, GraphEdge,
   SequenceModel, GanttModel, PieModel,
-} from "./parsers";
+  ClassModel, ClassNode, ClassRelation, ClassRelationType,
+  StateModel, ERModel,
+  MindmapModel, MindmapNode, MindmapShape,
+  BlockModel, BlockItem,
+} from "../parsers";
 
 export function serialize(model: DiagramModel): string {
   switch (model.type) {
@@ -14,6 +18,16 @@ export function serialize(model: DiagramModel): string {
       return serializeGantt(model as GanttModel);
     case "pie":
       return serializePie(model as PieModel);
+    case "classDiagram":
+      return serializeClass(model as ClassModel);
+    case "stateDiagram-v2":
+      return serializeState(model as StateModel);
+    case "erDiagram":
+      return serializeER(model as ERModel);
+    case "mindmap":
+      return serializeMindmap(model as MindmapModel);
+    case "block-beta":
+      return serializeBlock(model as BlockModel);
     default:
       return (model as { rawLines: string[] }).rawLines.join("\n");
   }
@@ -112,4 +126,167 @@ function serializePie(model: PieModel): string {
   if (model.title) lines.push(`    title ${model.title}`);
   for (const s of model.slices) lines.push(`    "${s.label}" : ${s.value}`);
   return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Class diagram
+// ---------------------------------------------------------------------------
+
+function classRelArrow(type: ClassRelationType): string {
+  switch (type) {
+    case "inheritance":  return "<|--";
+    case "composition":  return "*--";
+    case "aggregation":  return "o--";
+    case "dependency":   return "<..";
+    case "realization":  return "<|..";
+    default:             return "<--";
+  }
+}
+
+function serializeClass(model: ClassModel): string {
+  const lines = ["classDiagram"];
+
+  for (const cls of model.classes) {
+    if (cls.members.length === 0 && cls.methods.length === 0 && !cls.annotation) continue;
+    lines.push(`    class ${cls.id} {`);
+    if (cls.annotation) lines.push(`        <<${cls.annotation}>>`);
+    for (const m of cls.members) {
+      lines.push(`        ${m.visibility}${m.type}${m.type ? " " : ""}${m.name}`);
+    }
+    for (const m of cls.methods) {
+      lines.push(`        ${m.visibility}${m.name}(${m.params})${m.returnType ? " " + m.returnType : ""}`);
+    }
+    lines.push(`    }`);
+  }
+
+  for (const r of model.relations) {
+    const label = r.label ? ` : ${r.label}` : "";
+    lines.push(`    ${r.source} ${classRelArrow(r.type)} ${r.target}${label}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// State diagram
+// ---------------------------------------------------------------------------
+
+function serializeState(model: StateModel): string {
+  const lines = ["stateDiagram-v2"];
+
+  // Emit state labels
+  for (const s of model.states) {
+    if (s.label) {
+      lines.push(`    state "${s.label}" as ${s.id}`);
+    }
+    if (s.kind === "choice" || s.kind === "fork" || s.kind === "join") {
+      lines.push(`    state ${s.id} <<${s.kind}>>`);
+    }
+  }
+
+  for (const t of model.transitions) {
+    const label = t.label ? ` : ${t.label}` : "";
+    lines.push(`    ${t.source} --> ${t.target}${label}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// ER diagram
+// ---------------------------------------------------------------------------
+
+function erCardStr(c: string): string {
+  switch (c) {
+    case "||": return "||";
+    case "|{": return "|{";
+    case "o|": return "o|";
+    case "o{": return "o{";
+    default:   return "||";
+  }
+}
+
+function serializeER(model: ERModel): string {
+  const lines = ["erDiagram"];
+
+  for (const r of model.relations) {
+    lines.push(`    ${r.entityA} ${erCardStr(r.cardA)}--${erCardStr(r.cardB)} ${r.entityB} : ${r.label}`);
+  }
+
+  for (const ent of model.entities) {
+    if (ent.attributes.length === 0) continue;
+    lines.push(`    ${ent.name} {`);
+    for (const a of ent.attributes) {
+      const parts = [a.type, a.name];
+      if (a.key) parts.push(a.key);
+      if (a.comment) parts.push(`"${a.comment}"`);
+      lines.push(`        ${parts.join(" ")}`);
+    }
+    lines.push(`    }`);
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Mindmap
+// ---------------------------------------------------------------------------
+
+function shapeWrap(label: string, shape: MindmapShape): string {
+  switch (shape) {
+    case "circle":  return `((${label}))`;
+    case "rounded": return `(${label})`;
+    case "rect":    return `[${label}]`;
+    case "bang":    return `))${label}((`;
+    case "cloud":   return `)${label}(`;
+    case "hexagon": return `{{${label}}}`;
+    default:        return label;
+  }
+}
+
+function serializeMindmapNode(node: MindmapNode, indent: number, lines: string[]) {
+  lines.push(" ".repeat(indent) + shapeWrap(node.label, node.shape));
+  for (const child of node.children) {
+    serializeMindmapNode(child, indent + 4, lines);
+  }
+}
+
+function serializeMindmap(model: MindmapModel): string {
+  const lines = ["mindmap"];
+  serializeMindmapNode(model.root, 4, lines);
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Block-beta
+// ---------------------------------------------------------------------------
+
+function serializeBlock(model: BlockModel): string {
+  const lines = ["block-beta"];
+  if (model.columns > 1) lines.push(`    columns ${model.columns}`);
+
+  for (const b of model.blocks) {
+    serializeBlockItem(b, 4, lines);
+  }
+
+  for (const a of model.arrows) {
+    const label = a.label ? ` "${a.label}" -->` : "";
+    lines.push(`    ${a.source} -->${label} ${a.target}`);
+  }
+
+  return lines.join("\n");
+}
+
+function serializeBlockItem(item: BlockItem, indent: number, lines: string[]) {
+  const pad = " ".repeat(indent);
+  if (item.children.length > 0) {
+    lines.push(`${pad}block:${item.id}`);
+    for (const child of item.children) {
+      serializeBlockItem(child, indent + 4, lines);
+    }
+    lines.push(`${pad}end`);
+  } else {
+    const spanStr = item.span > 1 ? `:${item.span}` : "";
+    lines.push(`${pad}${item.id}["${item.label}"]${spanStr}`);
+  }
 }

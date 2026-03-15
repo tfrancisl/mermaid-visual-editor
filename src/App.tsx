@@ -3,11 +3,39 @@ import { invoke } from "@tauri-apps/api/core";
 import mermaid from "mermaid";
 import Editor, { type CursorPosition } from "./components/Editor";
 import Canvas from "./components/Canvas";
+import Preview from "./components/Preview";
 import Resizable from "./components/Resizable";
 import DiagramTypePicker from "./components/DiagramTypePicker";
 import { detectDiagramType } from "./lib/parsers";
 import { openMmdFile, saveMmdFile, saveMmdFileAs, basename } from "./lib/fileOps";
 import { getTemplate } from "./lib/templates";
+
+// ---------------------------------------------------------------------------
+// Pane visibility
+// ---------------------------------------------------------------------------
+
+interface PaneVisibility {
+  visual: boolean;
+  source: boolean;
+  preview: boolean;
+}
+
+const PANE_STORAGE_KEY = "pane-visibility";
+
+function loadPaneVisibility(): PaneVisibility {
+  try {
+    const raw = localStorage.getItem(PANE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { visual: !!parsed.visual, source: !!parsed.source, preview: !!parsed.preview };
+    }
+  } catch { /* ignore */ }
+  return { visual: true, source: true, preview: false };
+}
+
+function savePaneVisibility(v: PaneVisibility) {
+  localStorage.setItem(PANE_STORAGE_KEY, JSON.stringify(v));
+}
 
 // Initialize mermaid for on-demand SVG export
 mermaid.initialize({
@@ -52,6 +80,19 @@ export default function App() {
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, col: 1 });
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // Pane visibility
+  const [panes, setPanes] = useState<PaneVisibility>(loadPaneVisibility);
+
+  function togglePane(key: keyof PaneVisibility) {
+    setPanes((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      // Don't allow all panes to be hidden — keep at least one
+      if (!next.visual && !next.source && !next.preview) return prev;
+      savePaneVisibility(next);
+      return next;
+    });
+  }
 
   // Diagram type picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -268,6 +309,21 @@ export default function App() {
         setActiveTabId(t[(idx - 1 + t.length) % t.length].id);
         return;
       }
+      if (mod && !e.shiftKey && e.key === "1") {
+        e.preventDefault();
+        togglePane("visual");
+        return;
+      }
+      if (mod && !e.shiftKey && e.key === "2") {
+        e.preventDefault();
+        togglePane("source");
+        return;
+      }
+      if (mod && !e.shiftKey && e.key === "3") {
+        e.preventDefault();
+        togglePane("preview");
+        return;
+      }
       if (e.key === "?" && !mod && !e.altKey) {
         if (e.target instanceof Element && e.target.closest(".monaco-editor")) return;
         setShowShortcuts((s) => !s);
@@ -293,6 +349,8 @@ export default function App() {
         exportingFormat={exportingFormat}
         exportError={exportError}
         onClearExportError={() => setExportError(null)}
+        panes={panes}
+        onTogglePane={togglePane}
       />
       <TabBar
         tabs={tabs}
@@ -303,10 +361,12 @@ export default function App() {
       />
 
       <main className="flex flex-1 min-h-0 overflow-hidden">
-        <Resizable defaultRatio={0.6} storageKey="split" className="flex-1">
-          <Canvas source={activeTab.source} onSourceChange={handleSourceChange} />
-          <SourcePane key={activeTab.id} source={activeTab.source} onChange={handleSourceChange} onCursorChange={setCursor} />
-        </Resizable>
+        <PaneLayout
+          panes={panes}
+          visual={<Canvas source={activeTab.source} onSourceChange={handleSourceChange} />}
+          source={<SourcePane key={activeTab.id} source={activeTab.source} onChange={handleSourceChange} onCursorChange={setCursor} />}
+          preview={<PreviewPane source={activeTab.source} />}
+        />
       </main>
 
       <StatusBar
@@ -364,17 +424,80 @@ function SourcePane({ source, onChange, onCursorChange }: {
 }
 
 // ---------------------------------------------------------------------------
+// Preview pane (mermaid SVG render)
+// ---------------------------------------------------------------------------
+
+function PreviewPane({ source }: { source: string }) {
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
+        <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Preview</span>
+      </div>
+      <div className="flex-1 min-h-0">
+        <Preview source={source} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pane layout — handles 1/2/3 visible panes with Resizable splits
+// ---------------------------------------------------------------------------
+
+function PaneLayout({ panes, visual, source, preview }: {
+  panes: PaneVisibility;
+  visual: React.ReactNode;
+  source: React.ReactNode;
+  preview: React.ReactNode;
+}) {
+  // Collect visible panes in order: visual, source, preview
+  const visible: { key: string; node: React.ReactNode }[] = [];
+  if (panes.visual) visible.push({ key: "visual", node: visual });
+  if (panes.source) visible.push({ key: "source", node: source });
+  if (panes.preview) visible.push({ key: "preview", node: preview });
+
+  if (visible.length === 0) return null;
+
+  if (visible.length === 1) {
+    return <div className="flex-1 min-h-0 overflow-hidden">{visible[0].node}</div>;
+  }
+
+  if (visible.length === 2) {
+    const sk = `split-${visible[0].key}-${visible[1].key}`;
+    return (
+      <Resizable defaultRatio={0.5} storageKey={sk} className="flex-1">
+        {visible[0].node}
+        {visible[1].node}
+      </Resizable>
+    );
+  }
+
+  // 3 panes: nested Resizable — first pane | (second + third)
+  return (
+    <Resizable defaultRatio={0.4} storageKey="split-3-outer" className="flex-1">
+      {visible[0].node}
+      <Resizable defaultRatio={0.5} storageKey="split-3-inner">
+        {visible[1].node}
+        {visible[2].node}
+      </Resizable>
+    </Resizable>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar
 // ---------------------------------------------------------------------------
 
 function Toolbar({
   onOpen, onSave, onSaveAs,
   onExportSVG, onExportBinary, exportingFormat, exportError, onClearExportError,
+  panes, onTogglePane,
 }: {
   onOpen: () => void; onSave: () => void; onSaveAs: () => void;
   onExportSVG: () => void; onExportBinary: (f: ExportFormat) => void;
   exportingFormat: ExportFormat | null; exportError: string | null;
   onClearExportError: () => void;
+  panes: PaneVisibility; onTogglePane: (key: keyof PaneVisibility) => void;
 }) {
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -383,6 +506,12 @@ function Toolbar({
       <TBtn onClick={onOpen}    label="Open..."    kbd="Ctrl+O" />
       <TBtn onClick={onSave}    label="Save"     kbd="Ctrl+S" />
       <TBtn onClick={onSaveAs}  label="Save As..." kbd="Ctrl+Shift+S" />
+      <Divider />
+
+      {/* Pane visibility toggles */}
+      <PaneToggle label="Visual" kbd="Ctrl+1" active={panes.visual} onClick={() => onTogglePane("visual")} />
+      <PaneToggle label="Source" kbd="Ctrl+2" active={panes.source} onClick={() => onTogglePane("source")} />
+      <PaneToggle label="Preview" kbd="Ctrl+3" active={panes.preview} onClick={() => onTogglePane("preview")} />
       <Divider />
 
       <div className="relative">
@@ -507,6 +636,11 @@ const SHORTCUTS = [
     { key: "Esc",        desc: "Return to Select tool" },
     { key: "Bksp / Del", desc: "Delete selected node / edge" },
   ]},
+  { group: "Panes", items: [
+    { key: "Ctrl 1", desc: "Toggle Visual pane" },
+    { key: "Ctrl 2", desc: "Toggle Source pane" },
+    { key: "Ctrl 3", desc: "Toggle Preview pane" },
+  ]},
   { group: "Other", items: [
     { key: "?",         desc: "Toggle this panel" },
   ]},
@@ -539,6 +673,22 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------------------
 // Tiny UI atoms
 // ---------------------------------------------------------------------------
+
+function PaneToggle({ label, kbd, active, onClick }: { label: string; kbd: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={kbd}
+      className={`px-2 py-1 text-xs rounded transition-colors ${
+        active
+          ? "bg-[var(--bg-surface)] text-[var(--text-primary)]"
+          : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] opacity-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
 
 function TBtn({ onClick, label, kbd }: { onClick: () => void; label: string; kbd?: string }) {
   return (

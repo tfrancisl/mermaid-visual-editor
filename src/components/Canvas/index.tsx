@@ -3,6 +3,11 @@ import FlowchartCanvas from "./FlowchartCanvas";
 import SequenceEditor from "./SequenceEditor";
 import GanttEditor from "./GanttEditor";
 import PieEditor from "./PieEditor";
+import ClassCanvas from "./ClassCanvas";
+import StateCanvas from "./StateCanvas";
+import ERCanvas from "./ERCanvas";
+import MindmapCanvas from "./MindmapCanvas";
+import BlockCanvas from "./BlockCanvas";
 
 interface CanvasProps {
   source: string;
@@ -23,6 +28,21 @@ export default function Canvas({ source, onSourceChange }: CanvasProps) {
   }
   if (type === "pie") {
     return <PieEditor source={source} onSourceChange={onSourceChange} />;
+  }
+  if (type === "classDiagram") {
+    return <ClassCanvas source={source} onSourceChange={onSourceChange} />;
+  }
+  if (type === "stateDiagram-v2") {
+    return <StateCanvas source={source} onSourceChange={onSourceChange} />;
+  }
+  if (type === "erDiagram") {
+    return <ERCanvas source={source} onSourceChange={onSourceChange} />;
+  }
+  if (type === "mindmap") {
+    return <MindmapCanvas source={source} onSourceChange={onSourceChange} />;
+  }
+  if (type === "block-beta") {
+    return <BlockCanvas source={source} onSourceChange={onSourceChange} />;
   }
 
   return (
