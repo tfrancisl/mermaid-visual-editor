@@ -4,7 +4,7 @@
 
 ## Overview
 
-A Tauri v2 desktop application for visually editing Mermaid diagrams.
+A browser-based application for visually editing Mermaid diagrams. Axum (Rust) server backend with a React/TypeScript frontend.
 
 ```mermaid
 flowchart TB
@@ -14,20 +14,20 @@ flowchart TB
         Preview["Mermaid.js Preview\n(Live SVG render)"]
         Parser["parse()"]
         Serializer["serialize()"]
-        Buffer["ChangeBuffer\n(mutation queue)"]
     end
-    subgraph Backend ["Rust Backend (Tauri v2)"]
-        FS["File System\n(open / save .mmd)"]
+    subgraph Backend ["Rust Backend (Axum)"]
+        API["HTTP API\n(/api/export, /api/file/*)"]
         mmdc["mmdc subprocess\n(PNG / PDF export)"]
+        Watch["File Watcher\n(notify + WebSocket)"]
     end
     Monaco -->|"source — 300 ms debounce"| Parser
     Parser -->|"DiagramModel"| Canvas
     Monaco -->|"source — 300 ms debounce"| Preview
-    Canvas -->|"mutations"| Buffer
-    Buffer -->|"flush — 1.5 s / ⌘↵"| Serializer
+    Canvas -->|"1.5 s / ⌘↵"| Serializer
     Serializer -->|"Mermaid source"| Monaco
-    Monaco <-->|"Tauri IPC: open_file / save_file"| FS
-    Canvas <-->|"Tauri IPC: export_diagram"| mmdc
+    Monaco <-->|"fetch: /api/file/*"| API
+    Canvas <-->|"fetch: /api/export"| mmdc
+    Watch -->|"WebSocket push"| Monaco
 ```
 
 _Open in editor: [`docs/component-graph.mmd`](component-graph.mmd)_
@@ -38,17 +38,14 @@ The key design insight: changes are buffered rather than continuously synced.
 
 ### Text → Visual (debounced ~300ms)
 1. User types in Monaco Editor
-2. Source string is passed to `parse()` → `GraphModel`
+2. Source string is passed to `parse()` → `DiagramModel`
 3. React Flow canvas re-renders from the new model
 
-### Visual → Text (on explicit commit)
+### Visual → Text (auto-sync 1.5s or ⌘Enter)
 1. User drags a node / adds an edge / edits a label on the canvas
-2. Each mutation is appended to the `ChangeBuffer` via `changeBuffer.push()`
-3. On "Apply" button click or auto-save interval: `changeBuffer.flush()`
-4. Flush calls `serialize(model)` → regenerates Mermaid syntax
-5. Monaco editor updates to the new source
-
-This avoids the hardest problem (perfect round-trip AST parsing for all diagram types) and gives a natural commit UX.
+2. `useEffect([nodes, edges])` debounces 1.5s, then calls `serialize(model)`
+3. `onSourceChange(newSource)` bubbles up to `App` → Monaco updates
+4. `ownUpdateRef` prevents the resulting `source` prop change from triggering a re-parse
 
 ```mermaid
 sequenceDiagram
@@ -56,7 +53,6 @@ sequenceDiagram
     participant Monaco as Monaco Editor
     participant Parser as parse()
     participant Canvas as Canvas Component
-    participant Buffer as ChangeBuffer
     participant Serializer as serialize()
     participant Preview as Mermaid.js Preview
 
@@ -65,12 +61,10 @@ sequenceDiagram
     Monaco->>Parser: source string
     Parser->>Canvas: DiagramModel (nodes + edges)
     Canvas-->>Canvas: suppressSyncRef = true
-    Canvas->>Preview: re-render SVG
 
     Note over User,Preview: Direction 2 — Visual → Text (1.5 s / ⌘↵)
     User->>Canvas: drags node / adds edge / edits label
-    Canvas->>Buffer: push(mutation)
-    Buffer->>Serializer: flush()
+    Canvas->>Serializer: serialize(model)
     Serializer-->>Canvas: ownUpdateRef = true
     Serializer->>Monaco: updated Mermaid source
     Monaco->>Preview: re-render SVG
@@ -82,37 +76,50 @@ _Open in editor: [`docs/sync-loop.mmd`](sync-loop.mmd)_
 
 ```
 src/
-  components/
-    Editor/         Monaco Editor wrapper + Mermaid language registration
-    Canvas/         React Flow visual editor (Phase 2)
-    Preview/        Mermaid.js SVG renderer
-  lib/
-    buffer.ts       ChangeBuffer — accumulates visual mutations
-    parsers/        Mermaid text → GraphModel, per diagram type
-    serializers/    GraphModel → Mermaid text, per diagram type
+  client/
+    main.tsx              React entry — mounts <App />, imports React Flow CSS
+    index.css             Global styles (Tailwind + CSS variables + utility classes)
+    App.tsx               Root component: tabs, panels, toolbar, status bar, shortcuts
+    components/
+      Editor/             Monaco Editor wrapper + Mermaid language registration
+      Canvas/             React Flow visual editor + form editors per diagram type
+      Preview/            Mermaid.js SVG renderer
+      Resizable/          Draggable split-pane
+      DiagramTypePicker/  Popover for switching diagram type
+    lib/
+      api.ts              Server API client (replaces Tauri IPC)
+      watchClient.ts      WebSocket client for file watching
+      fileOps.ts          File open/save with server API + browser fallback
+      parsers/            Mermaid text → DiagramModel, per diagram type
+      serializers/        DiagramModel → Mermaid text, per diagram type
+      layout.ts           BFS layered layout for flowchart nodes
+      templates.ts        Starter diagram source per type
 
-src-tauri/
-  src/
-    main.rs         Entry point
-    lib.rs          Tauri builder + IPC command handlers
-  capabilities/
-    default.json    Tauri v2 permission declarations
-  tauri.conf.json   App config (window, bundle, build commands)
-  Cargo.toml        Rust dependencies
+  server/
+    Cargo.toml            Rust dependencies (axum, tokio, notify, rust-embed, clap)
+    src/
+      main.rs             CLI args, bind port, open browser
+      lib.rs              Public module exports
+      routes.rs           Router: /api/*, /ws, static fallback
+      export.rs           POST /api/export (mmdc subprocess)
+      files.rs            File read/write/session endpoints
+      watch.rs            notify + WebSocket file change push
+      state.rs            Shared AppState (initial files, watched paths)
 
 docs/
-  architecture.md      This file
-  toolchain-decision.md ADR for Tauri selection
+  architecture.md         This file
+  dev-guide.md            Developer onboarding guide
 ```
 
 ## Implementation Phases
 
 | Phase | Status | Description |
 |---|---|---|
-| 0 | Done | Scaffold: Tauri + Vite + React + Monaco + Tailwind |
+| 0 | Done | Scaffold: Vite + React + Monaco + Tailwind |
 | 1 | Done | Core editor: Monaco + Mermaid preview + file I/O |
 | 2 | Done | Visual editing: React Flow canvas + form editors (sequence/gantt/pie) |
 | 3 | Done | Multi-tab, export (PNG/PDF/SVG), keyboard shortcuts |
+| — | Done | Migration: Tauri → Axum server + browser UI |
 | 4 | Deferred | AI integration (Claude API) |
 
 ## Open Questions
@@ -123,6 +130,5 @@ docs/
 
 ## Notes
 
-- Icons: run `cargo tauri icon path/to/icon.png` to generate all required icon sizes
-- Cross-compilation: use `tauri-action` GitHub Action for CI multi-platform builds
-- Nix: `nix develop` provides the full dev shell including WebKit2GTK
+- Export formats: SVG is instant (client-side mermaid.js render); PNG/PDF invoke `mmdc` via the server
+- Production binary embeds the frontend (`dist/`) via `rust-embed` — single self-contained executable

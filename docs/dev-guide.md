@@ -9,17 +9,20 @@
 **Prerequisites:** [Nix](https://nixos.org/) with flakes enabled. Nothing else needs to be installed globally.
 
 ```sh
-# 1. Enter the dev shell (provides Rust, cargo-tauri, Node, bun, jj, WebKit2GTK, etc.)
+# 1. Enter the dev shell (provides Rust, Node, bun, jj, mmdc)
 nix develop
 
 # 2. Install JS dependencies
 bun install
 
-# 3. Start the Tauri dev server (hot-reload frontend + live Rust rebuild on backend changes)
-cargo tauri dev
+# 3. Start the Vite frontend dev server (hot-reload, proxies /api and /ws to :3001)
+bun run dev
+
+# 4. In another terminal, start the Rust server
+bun run dev:server
 ```
 
-The app window opens automatically. The Vite dev server runs at `http://localhost:5173`.
+Open `http://localhost:5173` in your browser. The Vite dev server proxies API and WebSocket requests to the Rust server on port 3001.
 
 ---
 
@@ -29,43 +32,46 @@ The app window opens automatically. The Vite dev server runs at `http://localhos
 mermaid-visual-editor/
 ├── flake.nix                    # Nix dev shell — all tool dependencies declared here
 ├── package.json                 # JS dependencies (React, Monaco, React Flow, mermaid.js)
-├── vite.config.ts               # Vite build config
+├── Cargo.toml                   # Rust workspace (members: src/server)
+├── vite.config.ts               # Vite build config + dev proxy
 ├── tsconfig.json                # TypeScript config
 ├── index.html                   # HTML entry point
 │
 ├── src/
-│   ├── main.tsx                 # React entry — mounts <App />, imports React Flow CSS
-│   ├── index.css                # Global styles (Tailwind + CSS variables + utility classes)
-│   ├── App.tsx                  # Root component: tabs, panels, toolbar, status bar, shortcuts
+│   ├── client/                  # Frontend (React + TypeScript)
+│   │   ├── main.tsx             # React entry — mounts <App />, imports React Flow CSS
+│   │   ├── index.css            # Global styles (Tailwind + CSS variables + utility classes)
+│   │   ├── App.tsx              # Root component: tabs, panels, toolbar, status bar, shortcuts
+│   │   ├── components/
+│   │   │   ├── Editor/index.tsx     # Monaco Editor with custom Mermaid syntax + Catppuccin theme
+│   │   │   ├── Preview/index.tsx    # Mermaid.js SVG renderer, debounced 300 ms
+│   │   │   ├── Canvas/
+│   │   │   │   ├── index.tsx            # Canvas dispatcher — routes by diagram type
+│   │   │   │   ├── FlowchartCanvas.tsx  # React Flow visual editor for flowchart/graph
+│   │   │   │   ├── SequenceEditor.tsx   # Form-based editor for sequence diagrams
+│   │   │   │   ├── GanttEditor.tsx      # Form-based editor for Gantt charts
+│   │   │   │   └── PieEditor.tsx        # Form-based editor for pie charts
+│   │   │   ├── Resizable/index.tsx      # Draggable split-pane; persists ratio in localStorage
+│   │   │   └── DiagramTypePicker/index.tsx  # Popover for switching diagram type
+│   │   └── lib/
+│   │       ├── api.ts               # Server API client (export, file I/O, session)
+│   │       ├── watchClient.ts       # WebSocket client for file watching
+│   │       ├── fileOps.ts           # Open/save with server API + browser fallback
+│   │       ├── layout.ts            # BFS layered layout for flowchart nodes
+│   │       ├── parsers/index.ts     # parse() + detectDiagramType() → DiagramModel union
+│   │       ├── serializers/index.ts # serialize(DiagramModel) → Mermaid source string
+│   │       └── templates.ts         # Starter diagram source per type
 │   │
-│   ├── components/
-│   │   ├── Editor/index.tsx     # Monaco Editor with custom Mermaid syntax + Catppuccin theme
-│   │   ├── Preview/index.tsx    # Mermaid.js SVG renderer, debounced 300 ms
-│   │   ├── Canvas/
-│   │   │   ├── index.tsx        # Canvas dispatcher — routes to the correct editor by diagram type
-│   │   │   ├── FlowchartCanvas.tsx  # React Flow visual editor for flowchart/graph
-│   │   │   ├── SequenceEditor.tsx   # Form-based editor for sequence diagrams
-│   │   │   ├── GanttEditor.tsx      # Form-based editor for Gantt charts
-│   │   │   └── PieEditor.tsx        # Form-based editor for pie charts
-│   │   ├── Resizable/index.tsx  # Draggable split-pane; persists ratio in localStorage
-│   │   └── DiagramTypePicker/index.tsx  # Popover for switching diagram type
-│   │
-│   └── lib/
-│       ├── buffer.ts            # ChangeBuffer — accumulates mutations, flushes on demand
-│       ├── fileOps.ts           # open/save with Tauri dialog + browser fallback
-│       ├── layout.ts            # BFS layered layout for flowchart nodes
-│       ├── parsers/index.ts     # parse() + detectDiagramType() → DiagramModel union
-│       ├── serializers/index.ts # serialize(DiagramModel) → Mermaid source string
-│       └── templates.ts         # Starter diagram source per type
-│
-├── src-tauri/
-│   ├── tauri.conf.json          # App config: window size, bundle ID, devUrl
-│   ├── Cargo.toml               # Rust deps (tauri, base64, serde)
-│   └── src/
-│       ├── main.rs              # Binary entry point
-│       └── lib.rs               # Tauri builder + IPC command handlers
-│       capabilities/
-│       └── default.json         # Tauri v2 permission declarations
+│   └── server/                  # Backend (Rust + Axum)
+│       ├── Cargo.toml           # Rust deps (axum, tokio, notify, rust-embed, clap)
+│       └── src/
+│           ├── main.rs          # CLI args, bind port, open browser
+│           ├── lib.rs           # Public module exports
+│           ├── routes.rs        # Router: /api/*, /ws, static fallback
+│           ├── export.rs        # POST /api/export (mmdc subprocess)
+│           ├── files.rs         # File read/write/session endpoints
+│           ├── watch.rs         # notify + WebSocket file change push
+│           └── state.rs         # Shared AppState (initial files, watched paths)
 │
 ├── examples/
 │   ├── flowchart.mmd            # All 8 node shapes + 4 edge styles + subgraphs
@@ -77,7 +83,6 @@ mermaid-visual-editor/
     ├── architecture.md          # Design overview and buffered sync model
     ├── component-graph.mmd      # System architecture as Mermaid flowchart
     ├── sync-loop.mmd            # Bidirectional sync sequence diagram
-    ├── toolchain-decision.md    # ADR: why Tauri over Electron / web
     └── dev-guide.md             # This file
 ```
 
@@ -85,17 +90,17 @@ mermaid-visual-editor/
 
 ## 3. Architecture
 
-### Panel Modes
+### Pane Modes
 
-The app has three panel modes toggled from the toolbar (or `⌘\``):
+The app has three panes togglable from the toolbar (or `Ctrl+1/2/3`):
 
-| Mode | Left pane | Right pane |
-|------|-----------|------------|
-| **Editor** | Monaco text editor | Mermaid.js live preview |
-| **Canvas** | Visual editor (React Flow or form) | Monaco source (read/edit) |
-| **Preview** | — | Full-screen Mermaid.js preview |
+| Pane | Content |
+|------|---------|
+| **Visual** | Visual editor (React Flow or form) |
+| **Source** | Monaco text editor |
+| **Preview** | Mermaid.js live SVG preview |
 
-Both panes in Editor/Canvas are resizable via the `Resizable` splitter.
+All visible panes are arranged in a resizable split via the `Resizable` splitter. At least one pane must be visible.
 
 ### Buffered Sync Model
 
@@ -110,17 +115,20 @@ Both panes in Editor/Canvas are resizable via the `Resizable` splitter.
 3. `onSourceChange(newSource)` bubbles up to `App` → Monaco updates
 4. `ownUpdateRef` prevents the resulting `source` prop change from triggering a re-parse
 
-### Tauri IPC
+### Server API
 
-Rust commands are invoked via `invoke("command_name", { ...args })` from the frontend. Current commands:
+The Rust server provides HTTP endpoints and WebSocket file watching:
 
-| Command | Args | Returns |
-|---------|------|---------|
-| `open_file` | `{ path }` | `string` (file contents) |
-| `save_file` | `{ path, content }` | — |
-| `export_diagram` | `{ source, format }` | `string` (base64 PNG or PDF) |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Server availability check |
+| `/api/export` | POST | Export diagram via mmdc (PNG/PDF/SVG) |
+| `/api/file/save` | POST | Write file to disk |
+| `/api/file/read` | GET | Read file from disk |
+| `/api/session` | GET | Files opened via CLI args |
+| `/ws` | WS | File watching (watch/unwatch commands, change/delete events) |
 
-Permissions are declared in `src-tauri/capabilities/default.json`.
+The frontend detects server availability via `GET /api/health` (cached). When unavailable, it falls back to browser-only mode (file picker, download).
 
 ---
 
@@ -128,25 +136,25 @@ Permissions are declared in `src-tauri/capabilities/default.json`.
 
 Follow these steps to add support for a new Mermaid diagram type (e.g. `classDiagram`):
 
-1. **Register the type** — Add an entry to the `DIAGRAM_TYPES` array in `src/lib/templates.ts`:
+1. **Register the type** — Add an entry to the `DIAGRAM_TYPES` array in `src/client/lib/templates.ts`:
    ```ts
    { id: "classDiagram", label: "Class", icon: "⬡" }
    ```
 
 2. **Add a starter template** — Add a `case "classDiagram":` branch in `getTemplate()` in the same file returning valid Mermaid source.
 
-3. **Add a parser** — In `src/lib/parsers/index.ts`, add a `parseClassDiagram(lines)` function and wire it into `parse()`. Export any new model type and add it to the `DiagramModel` union.
+3. **Add a parser** — In `src/client/lib/parsers/index.ts`, add a `parseClassDiagram(lines)` function and wire it into `parse()`. Export any new model type and add it to the `DiagramModel` union.
 
-4. **Add a serializer** — In `src/lib/serializers/index.ts`, add a `serializeClassDiagram(model)` function and wire it into the `serialize()` dispatcher.
+4. **Add a serializer** — In `src/client/lib/serializers/index.ts`, add a `serializeClassDiagram(model)` function and wire it into the `serialize()` dispatcher.
 
-5. **Add a form/canvas editor** — Create `src/components/Canvas/ClassDiagramEditor.tsx`. The component receives `{ source, onSourceChange }`. Use the `ownUpdateRef` pattern (see §5) to avoid re-parse cycles.
+5. **Add a form/canvas editor** — Create `src/client/components/Canvas/ClassDiagramEditor.tsx`. The component receives `{ source, onSourceChange }`. Use the `ownUpdateRef` pattern (see §5) to avoid re-parse cycles.
 
-6. **Register in the Canvas dispatcher** — In `src/components/Canvas/index.tsx`, add a branch:
+6. **Register in the Canvas dispatcher** — In `src/client/components/Canvas/index.tsx`, add a branch:
    ```tsx
    if (diagramType === "classDiagram") return <ClassDiagramEditor ... />;
    ```
 
-7. **Test round-trip** — Open the Canvas panel, make a change, and verify the Monaco source updates correctly after the 1.5 s debounce.
+7. **Test round-trip** — Open the Visual pane, make a change, and verify the Monaco source updates correctly after the 1.5 s debounce.
 
 ---
 
@@ -193,17 +201,22 @@ Canvas-specific shortcuts (e.g. `⌘Enter` to sync) belong in the canvas compone
 ## 7. Build & Release
 
 ```sh
-# Production build (creates platform-native installer in src-tauri/target/release/bundle/)
-cargo tauri build
-```
+# Build frontend
+bun run build
 
-**App icons:** Generate all required sizes from a single 1024×1024 PNG:
-```sh
-cargo tauri icon path/to/icon.png
+# Build production server (embeds dist/ via rust-embed)
+bun run build:server
+
+# Run production server
+./target/release/server [FILE...]
 ```
 
 **Export formats:**
 - **SVG** — generated client-side from the live Mermaid.js render; instant, no external deps.
 - **PNG / PDF** — invokes `mmdc` (Mermaid CLI) as a subprocess from Rust. `mmdc` must be on `$PATH` (provided automatically in the Nix dev shell; bundle it for distribution).
 
-**Cross-platform CI:** Use the official `tauri-action` GitHub Action to build for Linux, macOS, and Windows in parallel.
+**File watching:**
+```sh
+# Open files and watch for external changes (e.g. editing in vim)
+./target/release/server ~/diagrams/flowchart.mmd ~/diagrams/sequence.mmd
+```

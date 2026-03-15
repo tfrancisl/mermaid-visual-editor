@@ -1,37 +1,34 @@
-# ADR: Tauri v2 as Desktop Framework
+# ADR: Desktop Framework → Browser + Axum Server
 
-**Status:** Accepted
-**Date:** 2026-03-07
+**Status:** Superseded
+**Original date:** 2026-03-07
+**Updated:** 2026-03-15
 
-## Decision
+## Current Decision
 
-Use **Tauri v2** (Rust backend + system webview) as the desktop framework for Mermaid Visual Editor.
+Use an **Axum HTTP server** (Rust) serving the React frontend to the user's browser. Replaced Tauri v2.
 
-## Context
+## Why the Change
 
-Mermaid is JavaScript-native — the canonical renderer (`mermaid.js`) runs in the browser. The editor UI (Monaco Editor, React Flow) is also JS/React-based. We need a desktop shell that:
+Tauri v2's WebKitGTK webview was buggy on Linux (WM-related rendering issues). The app's functionality is entirely browser-compatible — Tauri provided only:
+1. One `invoke("export_diagram")` call to shell out to `mmdc`
+2. Native file dialogs via plugins (already had browser fallbacks)
+3. Window chrome
 
-1. Runs JS/React natively (no subprocess or JS engine embedding)
-2. Supports file system access for opening and saving `.mmd` files
-3. Produces small, distributable binaries
-4. Targets Linux, macOS, and eventually Windows
+Replacing Tauri with a lightweight Rust HTTP server:
+- Lets users open the app in their preferred browser
+- Enables filesystem watching for external editor workflows (vim, etc.)
+- Simplifies the dev environment by dropping ~12 WebKitGTK/GTK packages from the Nix flake
+- Produces a single self-contained binary via `rust-embed`
 
-## Alternatives Considered
+## Original Context (for reference)
 
-| Option | Verdict | Reason |
-|---|---|---|
-| **Tauri v2** | **Selected** | Mermaid.js runs in the webview; Rust backend; ~5MB binary; cross-platform |
-| Wails (Go) | Strong alt | Identical architecture; Go is simpler; smaller community and security model |
-| Electron | Rejected | ~150MB binary; no advantage for this use case |
-| GPUI (Rust) | Not viable | Not designed for third-party apps; no webview; everything from scratch |
-| Fyne/Gio (Go) | Not viable | No mature Go graph editing libraries |
-| Pure PWA | Deferred | No native file dialogs; viable future fallback if desktop proves hard to ship |
+The original decision evaluated Tauri v2, Wails (Go), Electron, GPUI (Rust), Fyne/Gio (Go), and pure PWA. Tauri was selected for its small binary size (~5MB) and native webview approach. In practice, the WebKitGTK dependency on Linux proved more trouble than it was worth for this use case.
 
 ## Consequences
 
-- **Mermaid.js runs natively** in the frontend webview — no subprocess needed for rendering
-- **Export** (PNG/PDF) calls `mmdc` as a Rust subprocess via `tauri-plugin-shell`
-- **Linux** requires WebKit2GTK 4.1 (`webkitgtk_4_1`) as a system dependency; managed via Nix flake
-- **macOS** uses WKWebView (built-in); **Windows** uses Edge WebView2 (bundled by Tauri)
-- Bundle size ~5–10MB vs Electron's ~150MB
-- Rust compiler times are the main development friction; mitigated by incremental builds
+- **No native file dialogs** — browser File API for open, server-side write for save-to-known-path, browser download for save-as
+- **File watching** — `notify` crate + WebSocket push enables external editor workflows
+- **Dev environment** — simpler Nix flake (no WebKitGTK, no cargo-tauri)
+- **Production binary** — `rust-embed` embeds `dist/` for a self-contained executable
+- **Cross-platform** — works anywhere Rust compiles + any modern browser
