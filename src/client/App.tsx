@@ -9,6 +9,8 @@ import DiagramTypePicker from "./components/DiagramTypePicker";
 import { detectDiagramType } from "./lib/parsers";
 import { openMmdFile, saveMmdFile, saveMmdFileAs, basename } from "./lib/fileOps";
 import { getTemplate } from "./lib/templates";
+import { hasServer, getSession } from "./lib/api";
+import { WatchClient } from "./lib/watchClient";
 
 // ---------------------------------------------------------------------------
 // Pane visibility
@@ -52,12 +54,13 @@ mermaid.initialize({
 interface Tab {
   id: string;
   filePath: string | null;
+  watchedPath: string | null;
   source: string;
   unsaved: boolean;
 }
 
-function makeTab(source: string, filePath: string | null = null): Tab {
-  return { id: crypto.randomUUID(), filePath, source, unsaved: false };
+function makeTab(source: string, filePath: string | null = null, watchedPath: string | null = null): Tab {
+  return { id: crypto.randomUUID(), filePath, watchedPath, source, unsaved: false };
 }
 
 const DEFAULT_SOURCE = getTemplate("flowchart");
@@ -107,6 +110,43 @@ export default function App() {
   const activeTabIdRef = useRef(activeTabId);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
+
+  // Watching state
+  const [watching, setWatching] = useState(false);
+  const watchClientRef = useRef<WatchClient | null>(null);
+
+  // Load session from server (CLI-opened files) and set up file watching
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!await hasServer()) return;
+      const session = await getSession();
+      if (cancelled || session.files.length === 0) return;
+
+      const newTabs = session.files.map((f) => makeTab(f.content, f.path, f.path));
+      setTabs(newTabs);
+      setActiveTabId(newTabs[0].id);
+
+      // Set up file watching
+      const client = new WatchClient();
+      watchClientRef.current = client;
+      client.onFileChange((path, content) => {
+        setTabs((prev) =>
+          prev.map((t) => (t.watchedPath === path ? { ...t, source: content } : t))
+        );
+      });
+      client.connect();
+      setWatching(true);
+
+      for (const f of session.files) {
+        client.watchFile(f.path);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      watchClientRef.current?.disconnect();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
   const diagramType = detectDiagramType(activeTab.source);
@@ -368,6 +408,7 @@ export default function App() {
         cursor={cursor}
         diagramType={diagramType}
         unsaved={activeTab.unsaved}
+        watching={watching && !!activeTab.watchedPath}
         onTypeClick={openPickerForSwitch}
         onShortcutsClick={() => setShowShortcuts((s) => !s)}
       />
@@ -582,8 +623,8 @@ function TabBar({ tabs, activeTabId, onActivate, onClose, onNewTab }: {
 // Status bar
 // ---------------------------------------------------------------------------
 
-function StatusBar({ cursor, diagramType, unsaved, onTypeClick, onShortcutsClick }: {
-  cursor: CursorPosition; diagramType: string; unsaved: boolean;
+function StatusBar({ cursor, diagramType, unsaved, watching, onTypeClick, onShortcutsClick }: {
+  cursor: CursorPosition; diagramType: string; unsaved: boolean; watching: boolean;
   onTypeClick: (e: React.MouseEvent) => void; onShortcutsClick: () => void;
 }) {
   return (
@@ -601,6 +642,12 @@ function StatusBar({ cursor, diagramType, unsaved, onTypeClick, onShortcutsClick
       <span className={`text-xs ${unsaved ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}>
         {unsaved ? "&#x25CF; unsaved" : "saved"}
       </span>
+      {watching && (
+        <>
+          <Sep />
+          <span className="text-xs text-[var(--accent)]">watching</span>
+        </>
+      )}
       <button
         onClick={onShortcutsClick}
         className="ml-auto text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
