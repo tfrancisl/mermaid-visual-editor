@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { exportDiagram } from "./lib/api";
 import mermaid from "mermaid";
 import Editor, { type CursorPosition } from "./components/Editor";
 import Canvas from "./components/Canvas";
@@ -245,13 +245,8 @@ export default function App() {
     setExportingFormat(format);
     setExportError(null);
     try {
-      const b64 = await invoke<string>("export_diagram", {
-        source: activeTab.source,
-        format,
-      });
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const mime = format === "png" ? "image/png" : "application/pdf";
-      downloadBlob(new Blob([bytes], { type: mime }), displayName.replace(/\.\w+$/, "") + "." + format);
+      const blob = await exportDiagram(activeTab.source, format);
+      downloadBlob(blob, displayName.replace(/\.\w+$/, "") + "." + format);
     } catch (err) {
       setExportError(String(err));
     } finally {

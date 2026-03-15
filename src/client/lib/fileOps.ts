@@ -1,14 +1,11 @@
 /**
  * File I/O operations.
  *
- * Uses Tauri dialog + fs plugins when running as a desktop app.
- * Falls back to browser File API / anchor download for `bun run dev` without Tauri.
+ * Uses server API when available for save-to-known-path.
+ * Falls back to browser File API / anchor download otherwise.
  */
 
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-
-const isTauri = typeof window !== "undefined" && "__TAURI__" in window;
+import { hasServer, saveFile } from "./api";
 
 export interface OpenResult {
   path: string;
@@ -16,47 +13,26 @@ export interface OpenResult {
 }
 
 export async function openMmdFile(): Promise<OpenResult | null> {
-  if (!isTauri) return openFileBrowser();
-
-  const result = await open({
-    filters: [{ name: "Mermaid Diagrams", extensions: ["mmd", "md", "txt"] }],
-    multiple: false,
-  });
-
-  if (!result || Array.isArray(result)) return null;
-
-  const content = await readTextFile(result);
-  return { path: result, content };
+  return openFileBrowser();
 }
 
 export async function saveMmdFile(path: string, content: string): Promise<void> {
-  if (!isTauri) {
-    downloadText(content, basename(path));
+  // If server is available and path looks like a real FS path, save via server
+  if (path.includes("/") && await hasServer()) {
+    await saveFile(path, content);
     return;
   }
-  await writeTextFile(path, content);
+  downloadText(content, basename(path));
 }
 
-/** Opens a "save as" dialog and writes the file. Returns the chosen path, or null if cancelled. */
+/** Browser download fallback for "save as". Returns null (no path from browser download). */
 export async function saveMmdFileAs(content: string, suggestedName = "diagram.mmd"): Promise<string | null> {
-  if (!isTauri) {
-    downloadText(content, suggestedName);
-    return null;
-  }
-
-  const path = await save({
-    filters: [{ name: "Mermaid Diagrams", extensions: ["mmd"] }],
-    defaultPath: suggestedName,
-  });
-
-  if (!path) return null;
-
-  await writeTextFile(path, content);
-  return path;
+  downloadText(content, suggestedName);
+  return null;
 }
 
 // ---------------------------------------------------------------------------
-// Browser fallbacks (for `bun run dev` without Tauri)
+// Browser fallbacks
 // ---------------------------------------------------------------------------
 
 function openFileBrowser(): Promise<OpenResult | null> {
