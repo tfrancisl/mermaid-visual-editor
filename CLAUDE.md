@@ -4,21 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Desktop app for visually editing Mermaid diagrams. Tauri v2 (Rust backend + system webview) with a React/TypeScript frontend.
+Browser-based app for visually editing Mermaid diagrams. Axum (Rust) server backend + React/TypeScript frontend. Users open the app in their preferred browser.
 
 ## Development Commands
 
 All tooling is provided by the Nix flake — no global installs needed.
 
 ```sh
-nix develop                # enter dev shell (Rust, cargo-tauri, Node, bun, WebKit2GTK, mmdc)
+nix develop                # enter dev shell (Rust, Node, bun, mmdc)
 bun install                # install JS dependencies
-cargo tauri dev            # start app with hot-reload (frontend on :5173, Rust rebuilds on change)
-cargo tauri build          # production build → src-tauri/target/release/bundle/
-bun run build              # frontend-only build (tsc + vite)
+bun run dev                # Vite dev server on :5173 (proxies /api, /ws to :3001)
+bun run dev:server          # Rust axum server on :3001 (--dev mode, no static serving)
+bun run build              # frontend-only build (tsc + vite → dist/)
+bun run build:server        # production server build (embeds dist/ via rust-embed)
+bun run test               # vitest
+cargo test -p mermaid-visual-editor-server  # Rust tests
 ```
 
-There is no test framework or linter configured. TypeScript strict mode is on (`noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`). Run `bun run build` to type-check.
+TypeScript strict mode is on (`noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`). Run `bun run build` to type-check.
+
+Production usage:
+```sh
+bun run build && bun run build:server
+./target/release/server [FILE...]   # serves app, opens browser, watches files
+```
 
 ## Package Manager
 
@@ -50,27 +59,37 @@ Every new canvas editor **must** implement both guards. See `FlowchartCanvas.tsx
 ### Data Flow
 
 ```
-src/lib/parsers/index.ts    — parse() dispatches by diagram type → DiagramModel union
-src/lib/serializers/index.ts — serialize() dispatches by model.type → Mermaid source string
-src/lib/layout.ts           — BFS layered layout for flowchart nodes, preserves existing positions
-src/lib/buffer.ts           — ChangeBuffer class (push mutations, flush on demand)
+src/client/lib/parsers/index.ts    — parse() dispatches by diagram type → DiagramModel union
+src/client/lib/serializers/index.ts — serialize() dispatches by model.type → Mermaid source string
+src/client/lib/layout.ts           — BFS layered layout for flowchart nodes, preserves existing positions
+src/client/lib/buffer.ts           — ChangeBuffer class (push mutations, flush on demand)
 ```
 
 `DiagramModel` is a union: `GraphModel | SequenceModel | GanttModel | PieModel | RawModel`. Unsupported diagram types fall through as `RawModel` (raw lines, no visual editing).
 
-### Tauri IPC
+### Server API
 
-Frontend uses `invoke()` from `@tauri-apps/api/core`. Rust handlers in `src-tauri/src/lib.rs`. Currently one custom command: `export_diagram` (calls `mmdc` subprocess for PNG/PDF). File I/O uses Tauri's `plugin-fs` and `plugin-dialog` directly from the frontend via `src/lib/fileOps.ts`, with browser fallbacks when `__TAURI__` is not in `window`.
+Rust axum server in `src/server/`. Frontend communicates via HTTP/WebSocket, detected at runtime via `GET /api/health`.
 
-Permissions declared in `src-tauri/capabilities/default.json`.
+**Endpoints:**
+- `GET /api/health` — server availability check (result cached by frontend)
+- `POST /api/export` — `{ source, format }` → raw binary (PNG/PDF/SVG via `mmdc`)
+- `POST /api/file/save` — `{ path, content }` → write file to disk
+- `GET /api/file/read?path=...` — read file from disk
+- `GET /api/session` — returns files opened via CLI args
+- `WS /ws` — file watching (notify crate + WebSocket push)
+
+**Frontend API client:** `src/client/lib/api.ts` (replaces Tauri IPC). Browser fallbacks preserved when server is unavailable.
+
+**File watching client:** `src/client/lib/watchClient.ts` — WebSocket with auto-reconnect.
 
 ### Adding a New Diagram Type
 
-1. Add type + template in `src/lib/templates.ts`
-2. Add parser function + model type in `src/lib/parsers/index.ts`, extend `DiagramModel` union
-3. Add serializer in `src/lib/serializers/index.ts`
-4. Create editor component in `src/components/Canvas/` using the `ownUpdateRef` pattern
-5. Register in `src/components/Canvas/index.tsx` dispatcher
+1. Add type + template in `src/client/lib/templates.ts`
+2. Add parser function + model type in `src/client/lib/parsers/index.ts`, extend `DiagramModel` union
+3. Add serializer in `src/client/lib/serializers/index.ts`
+4. Create editor component in `src/client/components/Canvas/` using the `ownUpdateRef` pattern
+5. Register in `src/client/components/Canvas/index.tsx` dispatcher
 
 ### Keyboard Shortcuts
 
@@ -78,4 +97,4 @@ Global shortcuts are registered in a single `useEffect([], [])` in `App.tsx`. St
 
 ### Styling
 
-Tailwind CSS with CSS custom properties for theming (`--bg-primary`, `--bg-secondary`, `--text-primary`, `--text-muted`, `--accent`, `--border`). Catppuccin dark theme in the Monaco editor. Utility classes `field-input` / `field-select` defined in `src/index.css`.
+Tailwind CSS with CSS custom properties for theming (`--bg-primary`, `--bg-secondary`, `--text-primary`, `--text-muted`, `--accent`, `--border`). Catppuccin dark theme in the Monaco editor. Utility classes `field-input` / `field-select` defined in `src/client/index.css`.
