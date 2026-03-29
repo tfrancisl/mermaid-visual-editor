@@ -30,7 +30,7 @@ Users can visually edit any Mermaid diagram and have it immediately reflected as
 ### Active
 
 - [ ] AI-assisted diagram generation and editing
-- [ ] Improved diagram type coverage (class diagrams, state diagrams, ER diagrams)
+- ✓ Improved diagram type coverage (class diagrams, state diagrams, ER diagrams) — Validated in Phase 2: Diagram Editor Improvements
 - [ ] Better error recovery and user feedback for parse failures
 - [ ] Diagram templates and quick-start library
 
@@ -43,7 +43,7 @@ Users can visually edit any Mermaid diagram and have it immediately reflected as
 
 ## Context
 
-The project has completed its foundation phases (0–3): scaffold, core editor, visual canvas, multi-tab, export, and the Tauri→Axum migration. The existing codebase is in `src/client/` (React/TypeScript frontend) and `src/server/` (Rust axum backend). All core editing infrastructure is in place; the next focus is extending diagram type support and adding AI-assisted editing capabilities.
+Phase 2 complete — class, ER, and state diagram canvases now have full CRUD editing with round-trip fidelity (cardinality, identifying relationships, composite state detection). The project has completed its foundation phases (0–3): scaffold, core editor, visual canvas, multi-tab, export, and the Tauri→Axum migration. The existing codebase is in `src/client/` (React/TypeScript frontend) and `src/server/` (Rust axum backend). All core editing infrastructure is in place; the next focus is extending diagram type support and adding AI-assisted editing capabilities.
 
 Key architecture patterns already established:
 - Buffered sync model with `suppressSyncRef`/`ownUpdateRef` guards preventing infinite loops

@@ -16,32 +16,32 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Class Diagram Editor
 
-- [ ] **CLS-01**: User can add a class to a class diagram via the visual editor
-- [ ] **CLS-02**: User can delete a class from the visual editor
-- [ ] **CLS-03**: User can edit class name, attributes, and methods inline in the visual editor
-- [ ] **CLS-04**: User can drag to create a relationship between two classes
-- [ ] **CLS-05**: User can set relationship type (inheritance, composition, aggregation, association, dependency, realization)
-- [ ] **CLS-06**: User can set cardinality on both ends of a relationship
-- [ ] **CLS-07**: Class diagram canvas changes sync back to valid Mermaid source within 1.5s
+- [x] **CLS-01**: User can add a class to a class diagram via the visual editor
+- [x] **CLS-02**: User can delete a class from the visual editor
+- [x] **CLS-03**: User can edit class name, attributes, and methods inline in the visual editor
+- [x] **CLS-04**: User can drag to create a relationship between two classes
+- [x] **CLS-05**: User can set relationship type (inheritance, composition, aggregation, association, dependency, realization)
+- [x] **CLS-06**: User can set cardinality on both ends of a relationship
+- [x] **CLS-07**: Class diagram canvas changes sync back to valid Mermaid source within 1.5s
 
 ### ER Diagram Editor
 
-- [ ] **ER-01**: User can add an entity to an ER diagram via the visual editor
-- [ ] **ER-02**: User can delete an entity from the visual editor
-- [ ] **ER-03**: User can edit entity attributes (name, type, key designator) inline
-- [ ] **ER-04**: User can drag to create a relationship between two entities
-- [ ] **ER-05**: User can set relationship cardinality (one-or-zero, zero-or-more, one-or-more, exactly-one) on both ends
-- [ ] **ER-06**: User can set identifying vs non-identifying relationship (solid vs dashed line)
-- [ ] **ER-07**: User can add a label to a relationship
-- [ ] **ER-08**: ER diagram canvas changes sync back to valid Mermaid source without data loss (cardinalities preserved)
+- [x] **ER-01**: User can add an entity to an ER diagram via the visual editor
+- [x] **ER-02**: User can delete an entity from the visual editor
+- [x] **ER-03**: User can edit entity attributes (name, type, key designator) inline
+- [x] **ER-04**: User can drag to create a relationship between two entities
+- [x] **ER-05**: User can set relationship cardinality (one-or-zero, zero-or-more, one-or-more, exactly-one) on both ends
+- [x] **ER-06**: User can set identifying vs non-identifying relationship (solid vs dashed line)
+- [x] **ER-07**: User can add a label to a relationship
+- [x] **ER-08**: ER diagram canvas changes sync back to valid Mermaid source without data loss (cardinalities preserved)
 
 ### State Diagram Editor
 
-- [ ] **STT-01**: User can add a state to a state diagram via a form editor
-- [ ] **STT-02**: User can add a transition between states with an optional label
-- [ ] **STT-03**: User can delete states and transitions
-- [ ] **STT-04**: State diagram source parses and serializes without data loss for simple state diagrams
-- [ ] **STT-05**: Diagrams using composite state syntax (nested states, concurrency, fork/join) fall back to RawModel with a read-only notice
+- [x] **STT-01**: User can add a state to a state diagram via a form editor
+- [x] **STT-02**: User can add a transition between states with an optional label
+- [x] **STT-03**: User can delete states and transitions
+- [x] **STT-04**: State diagram source parses and serializes without data loss for simple state diagrams
+- [x] **STT-05**: Diagrams using composite state syntax (nested states, concurrency, fork/join) fall back to RawModel with a read-only notice
 
 ### AI Assistance
 
@@ -104,26 +104,26 @@ Deferred to next milestone. Tracked but not in current roadmap.
 | TMPL-02 | Phase 1 | Complete |
 | TMPL-03 | Phase 1 | Complete |
 | TMPL-04 | Phase 1 | Complete |
-| CLS-01 | Phase 2 | Pending |
-| CLS-02 | Phase 2 | Pending |
-| CLS-03 | Phase 2 | Pending |
-| CLS-04 | Phase 2 | Pending |
-| CLS-05 | Phase 2 | Pending |
-| CLS-06 | Phase 2 | Pending |
-| CLS-07 | Phase 2 | Pending |
-| ER-01 | Phase 2 | Pending |
-| ER-02 | Phase 2 | Pending |
-| ER-03 | Phase 2 | Pending |
-| ER-04 | Phase 2 | Pending |
-| ER-05 | Phase 2 | Pending |
-| ER-06 | Phase 2 | Pending |
-| ER-07 | Phase 2 | Pending |
-| ER-08 | Phase 2 | Pending |
-| STT-01 | Phase 2 | Pending |
-| STT-02 | Phase 2 | Pending |
-| STT-03 | Phase 2 | Pending |
-| STT-04 | Phase 2 | Pending |
-| STT-05 | Phase 2 | Pending |
+| CLS-01 | Phase 2 | Complete |
+| CLS-02 | Phase 2 | Complete |
+| CLS-03 | Phase 2 | Complete |
+| CLS-04 | Phase 2 | Complete |
+| CLS-05 | Phase 2 | Complete |
+| CLS-06 | Phase 2 | Complete |
+| CLS-07 | Phase 2 | Complete |
+| ER-01 | Phase 2 | Complete |
+| ER-02 | Phase 2 | Complete |
+| ER-03 | Phase 2 | Complete |
+| ER-04 | Phase 2 | Complete |
+| ER-05 | Phase 2 | Complete |
+| ER-06 | Phase 2 | Complete |
+| ER-07 | Phase 2 | Complete |
+| ER-08 | Phase 2 | Complete |
+| STT-01 | Phase 2 | Complete |
+| STT-02 | Phase 2 | Complete |
+| STT-03 | Phase 2 | Complete |
+| STT-04 | Phase 2 | Complete |
+| STT-05 | Phase 2 | Complete |
 | AI-01 | Phase 3 | Pending |
 | AI-02 | Phase 3 | Pending |
 | AI-03 | Phase 3 | Pending |

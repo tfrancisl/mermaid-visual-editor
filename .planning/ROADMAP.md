@@ -41,7 +41,12 @@ Plans:
   2. User can add, delete, and edit entities; drag to create relationships; set cardinality on both ends and identifying vs non-identifying; user-authored cardinalities survive a canvas edit without being silently discarded
   3. User can add states, define transitions with optional labels, and delete both via a form editor; diagrams using composite state syntax fall back to a read-only canvas with a clear notice
   4. State diagram source round-trips without data loss for simple state diagrams (no composite syntax)
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [x] 02-01-PLAN.md — Parser/serializer foundation: fix ER cardinality bug, add identifying support, composite state detection, class cardinality parsing
+- [x] 02-02-PLAN.md — ER canvas CRUD: fix data flow, add entity toolbar, entity edit popover, edge inspector
+- [x] 02-03-PLAN.md — Class canvas CRUD: cardinality round-trip, add class toolbar, class edit popover, edge inspector
+- [x] 02-04-PLAN.md — State canvas CRUD: composite fallback notice, add state/transition toolbar, inline rename
 **UI hint**: yes
 
 ### Phase 3: AI Integration
@@ -62,6 +67,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Error Recovery + Templates | 0/2 | Complete    | 2026-03-28 |
-| 2. Diagram Editor Improvements | 0/? | Not started | - |
+| 1. Error Recovery + Templates | 2/2 | Complete    | 2026-03-28 |
+| 2. Diagram Editor Improvements | 2/4 | In Progress|  |
 | 3. AI Integration | 0/? | Not started | - |
