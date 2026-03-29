@@ -14,26 +14,43 @@ const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const ZOOM_STEP = 15;
 
+export interface ParseError {
+  message: string;  // clean human-readable, HTML stripped
+  line: number;     // 1-indexed, fallback to 1
+  column: number;   // 1-indexed, fallback to 1
+}
+
+interface PreviewState {
+  svg: string | null;
+  error: ParseError | null;
+}
+
 interface PreviewProps {
   source: string;
   onSvgChange?: (svg: string) => void;
+  onError?: (error: ParseError | null) => void;
+  onJumpToLine?: (line: number) => void;
 }
 
-type State =
-  | { kind: "empty" }
-  | { kind: "ok"; svg: string }
-  | { kind: "error"; message: string };
+function extractLineCol(msg: string): { line: number; column: number } {
+  const lineMatch = msg.match(/\bon\s+line\s+(\d+)/i);
+  if (lineMatch) return { line: parseInt(lineMatch[1], 10), column: 1 };
+  const lineColMatch = msg.match(/line\s+(\d+)[,\s]+col(?:umn)?\s+(\d+)/i);
+  if (lineColMatch) return { line: parseInt(lineColMatch[1], 10), column: parseInt(lineColMatch[2], 10) };
+  return { line: 1, column: 1 };
+}
 
-export default function Preview({ source, onSvgChange }: PreviewProps) {
+export default function Preview({ source, onSvgChange, onError, onJumpToLine }: PreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<State>({ kind: "empty" });
+  const [state, setState] = useState<PreviewState>({ svg: null, error: null });
   const [zoom, setZoom] = useState(100);
 
   // Debounced render: wait 300ms after source stops changing
   useEffect(() => {
     const trimmed = source.trim();
     if (!trimmed) {
-      setState({ kind: "empty" });
+      setState({ svg: null, error: null });
+      onError?.(null);
       return;
     }
 
@@ -41,25 +58,29 @@ export default function Preview({ source, onSvgChange }: PreviewProps) {
       const id = `mermaid-preview-${++idCounter}`;
       try {
         const { svg } = await mermaid.render(id, trimmed);
-        setState({ kind: "ok", svg });
+        setState({ svg, error: null });
         onSvgChange?.(svg);
+        onError?.(null);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         // Strip the HTML Mermaid sometimes embeds in error messages
         const clean = msg.replace(/<[^>]+>/g, "").trim();
-        setState({ kind: "error", message: clean });
+        const { line, column } = extractLineCol(clean);
+        const parseError: ParseError = { message: clean, line, column };
+        setState((prev) => ({ svg: prev.svg, error: parseError }));
+        onError?.(parseError);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [source, onSvgChange]);
+  }, [source, onSvgChange, onError]);
 
   // Inject SVG into DOM
   useEffect(() => {
-    if (containerRef.current && state.kind === "ok") {
+    if (containerRef.current && state.svg) {
       containerRef.current.innerHTML = state.svg;
     }
-  }, [state]);
+  }, [state.svg]);
 
   function adjustZoom(delta: number) {
     setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z + delta)));
@@ -71,11 +92,16 @@ export default function Preview({ source, onSvgChange }: PreviewProps) {
 
   return (
     <div className="relative flex flex-col h-full overflow-hidden">
+      {/* Error banner — shown above SVG area when there's an error */}
+      {state.error && (
+        <ErrorBanner error={state.error} onJumpToLine={onJumpToLine} />
+      )}
+
       {/* SVG canvas */}
       <div className="flex-1 overflow-auto flex items-center justify-center p-4">
-        {state.kind === "empty" && <EmptyState />}
-        {state.kind === "error" && <ErrorState message={state.message} />}
-        {state.kind === "ok" && (
+        {!state.svg && !state.error && <EmptyState />}
+        {state.error && !state.svg && <EmptyState />}
+        {state.svg && (
           <div
             ref={containerRef}
             style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}
@@ -84,8 +110,8 @@ export default function Preview({ source, onSvgChange }: PreviewProps) {
         )}
       </div>
 
-      {/* Zoom controls — only shown when there's something to zoom */}
-      {state.kind === "ok" && (
+      {/* Zoom controls — only shown when there's an SVG to zoom */}
+      {state.svg && (
         <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1">
           <ZoomButton onClick={() => adjustZoom(-ZOOM_STEP)} label="−" />
           <button
@@ -98,6 +124,21 @@ export default function Preview({ source, onSvgChange }: PreviewProps) {
           <ZoomButton onClick={() => adjustZoom(ZOOM_STEP)} label="+" />
         </div>
       )}
+    </div>
+  );
+}
+
+function ErrorBanner({ error, onJumpToLine }: { error: ParseError; onJumpToLine?: (line: number) => void }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0 text-xs">
+      <span className="text-red-400 font-semibold shrink-0">Parse error</span>
+      <span className="text-[var(--text-muted)] truncate flex-1">{error.message}</span>
+      <button
+        onClick={() => onJumpToLine?.(error.line)}
+        className="text-[var(--accent)] hover:underline shrink-0 whitespace-nowrap"
+      >
+        Line {error.line}
+      </button>
     </div>
   );
 }
@@ -120,17 +161,6 @@ function EmptyState() {
       <p className="text-sm mb-2">Start typing a Mermaid diagram</p>
       <pre className="text-xs opacity-60 text-left inline-block">
         {`flowchart TD\n    A --> B`}
-      </pre>
-    </div>
-  );
-}
-
-function ErrorState({ message }: { message: string }) {
-  return (
-    <div className="w-full max-w-lg p-4">
-      <p className="text-xs font-semibold text-red-400 mb-2">Parse error</p>
-      <pre className="text-xs text-[var(--text-muted)] whitespace-pre-wrap break-words font-mono">
-        {message}
       </pre>
     </div>
   );

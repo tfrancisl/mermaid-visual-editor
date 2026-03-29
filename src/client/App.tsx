@@ -3,12 +3,13 @@ import { exportDiagram } from "./lib/api";
 import mermaid from "mermaid";
 import Editor, { type CursorPosition } from "./components/Editor";
 import Canvas from "./components/Canvas";
-import Preview from "./components/Preview";
+import Preview, { type ParseError } from "./components/Preview";
+import type { editor } from "monaco-editor";
 import Resizable from "./components/Resizable";
 import DiagramTypePicker from "./components/DiagramTypePicker";
 import { detectDiagramType } from "./lib/parsers";
 import { openMmdFile, saveMmdFile, saveMmdFileAs, basename } from "./lib/fileOps";
-import { getTemplate } from "./lib/templates";
+import { getTemplate, getTemplateById } from "./lib/templates";
 import { hasServer, getSession } from "./lib/api";
 import { WatchClient } from "./lib/watchClient";
 
@@ -83,6 +84,8 @@ export default function App() {
   const [cursor, setCursor] = useState<CursorPosition>({ line: 1, col: 1 });
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<ParseError | null>(null);
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   // Pane visibility
   const [panes, setPanes] = useState<PaneVisibility>(loadPaneVisibility);
@@ -163,6 +166,7 @@ export default function App() {
   function activateTab(id: string) {
     setActiveTabId(id);
     setCursor({ line: 1, col: 1 });
+    setParseError(null);
   }
 
   async function closeTab(id: string) {
@@ -248,8 +252,9 @@ export default function App() {
     setPickerOpen(true);
   }
 
-  function handleTypeSelected(type: string) {
-    const source = getTemplate(type);
+  function handleTypeSelected(templateIdOrType: string) {
+    const tmpl = getTemplateById(templateIdOrType);
+    const source = tmpl ? tmpl.source : getTemplate(templateIdOrType);
     const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current) ?? tabsRef.current[0];
     const isFreshUntitled = !tab.filePath && !tab.unsaved;
     const isEmpty = tab.source.trim() === "";
@@ -293,6 +298,16 @@ export default function App() {
       setExportingFormat(null);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Jump-to-line (error banner → Monaco cursor)
+  // ---------------------------------------------------------------------------
+
+  const handleJumpToLine = useCallback((line: number) => {
+    editorRef.current?.revealLineInCenter(line);
+    editorRef.current?.setPosition({ lineNumber: line, column: 1 });
+    editorRef.current?.focus();
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Keyboard shortcuts
@@ -399,8 +414,8 @@ export default function App() {
         <PaneLayout
           panes={panes}
           visual={<Canvas source={activeTab.source} onSourceChange={handleSourceChange} />}
-          source={<SourcePane key={activeTab.id} source={activeTab.source} onChange={handleSourceChange} onCursorChange={setCursor} />}
-          preview={<PreviewPane source={activeTab.source} />}
+          source={<SourcePane key={activeTab.id} source={activeTab.source} onChange={handleSourceChange} onCursorChange={setCursor} parseError={parseError} editorRef={editorRef} />}
+          preview={<PreviewPane source={activeTab.source} onError={setParseError} onJumpToLine={handleJumpToLine} />}
         />
       </main>
 
@@ -444,8 +459,12 @@ function downloadBlob(blob: Blob, filename: string) {
 // Source editor pane (right side)
 // ---------------------------------------------------------------------------
 
-function SourcePane({ source, onChange, onCursorChange }: {
-  source: string; onChange: (v: string) => void; onCursorChange: (p: CursorPosition) => void;
+function SourcePane({ source, onChange, onCursorChange, parseError, editorRef }: {
+  source: string;
+  onChange: (v: string) => void;
+  onCursorChange: (p: CursorPosition) => void;
+  parseError?: ParseError | null;
+  editorRef?: React.MutableRefObject<editor.IStandaloneCodeEditor | null>;
 }) {
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -453,7 +472,7 @@ function SourcePane({ source, onChange, onCursorChange }: {
         <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Source</span>
       </div>
       <div className="flex-1 min-h-0">
-        <Editor value={source} onChange={onChange} onCursorChange={onCursorChange} />
+        <Editor value={source} onChange={onChange} onCursorChange={onCursorChange} parseError={parseError} editorRef={editorRef} />
       </div>
     </div>
   );
@@ -463,14 +482,18 @@ function SourcePane({ source, onChange, onCursorChange }: {
 // Preview pane (mermaid SVG render)
 // ---------------------------------------------------------------------------
 
-function PreviewPane({ source }: { source: string }) {
+function PreviewPane({ source, onError, onJumpToLine }: {
+  source: string;
+  onError?: (error: ParseError | null) => void;
+  onJumpToLine?: (line: number) => void;
+}) {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex items-center px-3 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
         <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Preview</span>
       </div>
       <div className="flex-1 min-h-0">
-        <Preview source={source} />
+        <Preview source={source} onError={onError} onJumpToLine={onJumpToLine} />
       </div>
     </div>
   );

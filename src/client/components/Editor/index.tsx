@@ -1,5 +1,7 @@
+import { useEffect, useRef } from "react";
 import MonacoEditor, { Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
+import { type ParseError } from "../Preview";
 
 const DIAGRAM_TYPES = [
   "flowchart", "graph", "sequenceDiagram", "classDiagram",
@@ -10,7 +12,7 @@ const DIAGRAM_TYPES = [
 ];
 
 function registerMermaidLanguage(monaco: Monaco) {
-  if (monaco.languages.getLanguages().some((l) => l.id === "mermaid")) return;
+  if (monaco.languages.getLanguages().some((l: { id: string }) => l.id === "mermaid")) return;
 
   monaco.languages.register({ id: "mermaid" });
 
@@ -68,7 +70,7 @@ function registerMermaidLanguage(monaco: Monaco) {
   });
 
   monaco.languages.registerCompletionItemProvider("mermaid", {
-    provideCompletionItems: (model, position) => {
+    provideCompletionItems: (model: editor.ITextModel, position: { lineNumber: number; column: number }) => {
       const word = model.getWordUntilPosition(position);
       const range = {
         startLineNumber: position.lineNumber,
@@ -97,10 +99,17 @@ interface EditorProps {
   value: string;
   onChange: (value: string) => void;
   onCursorChange?: (pos: CursorPosition) => void;
+  parseError?: ParseError | null;
+  editorRef?: React.MutableRefObject<editor.IStandaloneCodeEditor | null>;
 }
 
-export default function Editor({ value, onChange, onCursorChange }: EditorProps) {
+export default function Editor({ value, onChange, onCursorChange, parseError, editorRef }: EditorProps) {
+  const editorInstanceRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+
   function handleMount(editorInstance: editor.IStandaloneCodeEditor, monaco: Monaco) {
+    editorInstanceRef.current = editorInstance;
+    monacoRef.current = monaco;
     registerMermaidLanguage(monaco);
     monaco.editor.setTheme("mermaid-dark");
 
@@ -109,7 +118,32 @@ export default function Editor({ value, onChange, onCursorChange }: EditorProps)
         onCursorChange({ line: e.position.lineNumber, col: e.position.column });
       });
     }
+
+    // Expose editor instance to parent for jump-to-line
+    if (editorRef) editorRef.current = editorInstance;
   }
+
+  // Update Monaco markers when parseError changes
+  useEffect(() => {
+    const editorInst = editorInstanceRef.current;
+    const monacoInst = monacoRef.current;
+    if (!editorInst || !monacoInst) return;
+    const model = editorInst.getModel();
+    if (!model) return;
+
+    if (parseError) {
+      monacoInst.editor.setModelMarkers(model, "mermaid", [{
+        startLineNumber: parseError.line,
+        startColumn: parseError.column,
+        endLineNumber: parseError.line,
+        endColumn: model.getLineMaxColumn(parseError.line),
+        message: parseError.message,
+        severity: monacoInst.MarkerSeverity.Error,
+      }]);
+    } else {
+      monacoInst.editor.setModelMarkers(model, "mermaid", []);
+    }
+  }, [parseError]);
 
   return (
     <MonacoEditor
