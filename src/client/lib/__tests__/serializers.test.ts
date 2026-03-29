@@ -215,6 +215,82 @@ describe("serializeER", () => {
     expect(out).toContain("int id PK");
     expect(out).toContain("string name");
   });
+
+  it("emits -- for identifying: true", () => {
+    const model: ERModel = {
+      type: "erDiagram",
+      entities: [],
+      relations: [{ id: "er0", entityA: "A", entityB: "B", cardA: "||", cardB: "o{", label: "has", identifying: true }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain("A ||--o{ B : has");
+  });
+
+  it("emits .. for identifying: false (non-identifying)", () => {
+    const model: ERModel = {
+      type: "erDiagram",
+      entities: [],
+      relations: [{ id: "er0", entityA: "A", entityB: "B", cardA: "||", cardB: "o{", label: "has", identifying: false }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain("A ||..o{ B : has");
+  });
+
+  it("defaults to -- when identifying is undefined", () => {
+    const model: ERModel = {
+      type: "erDiagram",
+      entities: [],
+      relations: [{ id: "er0", entityA: "A", entityB: "B", cardA: "||", cardB: "||", label: "r" }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain("A ||--|| B : r");
+  });
+});
+
+describe("serializeClass with cardinality", () => {
+  it("emits quoted cardinality labels on relations", () => {
+    const model: ClassModel = {
+      type: "classDiagram",
+      classes: [],
+      relations: [{
+        id: "r0",
+        source: "A",
+        target: "B",
+        type: "inheritance",
+        sourceCardinality: "1",
+        targetCardinality: "n",
+      }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain('A "1" <|-- "n" B');
+  });
+
+  it("omits cardinality when not specified", () => {
+    const model: ClassModel = {
+      type: "classDiagram",
+      classes: [],
+      relations: [{ id: "r0", source: "A", target: "B", type: "inheritance" }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain("A <|-- B");
+    expect(out).not.toContain('"');
+  });
+
+  it("emits only sourceCardinality when targetCardinality absent", () => {
+    const model: ClassModel = {
+      type: "classDiagram",
+      classes: [],
+      relations: [{ id: "r0", source: "A", target: "B", type: "association", sourceCardinality: "1" }],
+      rawLines: [],
+    };
+    const out = serialize(model);
+    expect(out).toContain('A "1" <-- B');
+  });
 });
 
 describe("serializeMindmap", () => {

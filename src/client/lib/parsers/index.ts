@@ -155,6 +155,7 @@ export interface StateModel {
   type: "stateDiagram-v2";
   states: StateNode[];
   transitions: StateTransition[];
+  hasCompositeStates?: boolean;
   rawLines: string[];
 }
 
@@ -183,6 +184,7 @@ export interface ERRelation {
   cardA: ERCardinality;
   cardB: ERCardinality;
   label: string;
+  identifying?: boolean;
 }
 
 export interface ERModel {
@@ -623,8 +625,8 @@ function parsePie(source: string): PieModel {
 // Class diagram parser
 // ---------------------------------------------------------------------------
 
-const CLASS_RELATION_RE = /^(\w+)\s+(<\|--|<\|\.\.|\*--|\*\.\.|o--|o\.\.|<--|<\.\.|--|\.\.)\s+(\w+)\s*(?::\s*(.+))?$/;
-const CLASS_RELATION_RE2 = /^(\w+)\s+(--\|>|\.\.\|>|--\*|\.\.\*|--o|\.\.o|-->|\.\.>|--|\.\.)(?:\s+(\w+))?\s*(?::\s*(.+))?$/;
+const CLASS_RELATION_RE = /^(\w+)\s+(?:"([^"]+)"\s+)?(<\|--|<\|\.\.|\*--|\*\.\.|o--|o\.\.|<--|<\.\.|--|\.\.)\s+(?:"([^"]+)"\s+)?(\w+)\s*(?::\s*(.+))?$/;
+const CLASS_RELATION_RE2 = /^(\w+)\s+(?:"([^"]+)"\s+)?(--\|>|\.\.\|>|--\*|\.\.\*|--o|\.\.o|-->|\.\.>|--|\.\.)(?:\s+"([^"]+)")?\s+(\w+)\s*(?::\s*(.+))?$/;
 
 function classRelType(arrow: string): ClassRelationType {
   if (arrow.includes("<|") || arrow.includes("|>")) return arrow.includes("..") ? "realization" : "inheritance";
@@ -711,21 +713,39 @@ function parseClass(source: string): ClassModel {
       continue;
     }
 
-    // Relations (arrow left)
+    // Relations (arrow left): src "srcCard" arrow "tgtCard" tgt : label
+    // Groups: 1=source, 2=sourceCardinality?, 3=arrow, 4=targetCardinality?, 5=target, 6=label?
     const rm = line.match(CLASS_RELATION_RE);
     if (rm) {
       ensureClass(rm[1]);
-      ensureClass(rm[3]);
-      relations.push({ id: `rel-${seenEdge++}`, source: rm[1], target: rm[3], type: classRelType(rm[2]), label: rm[4]?.trim() });
+      ensureClass(rm[5]);
+      relations.push({
+        id: `rel-${seenEdge++}`,
+        source: rm[1],
+        target: rm[5],
+        type: classRelType(rm[3]),
+        label: rm[6]?.trim(),
+        sourceCardinality: rm[2] || undefined,
+        targetCardinality: rm[4] || undefined,
+      });
       continue;
     }
 
-    // Relations (arrow right)
+    // Relations (arrow right): src "srcCard" arrow "tgtCard" tgt : label
+    // Groups: 1=source, 2=sourceCardinality?, 3=arrow, 4=targetCardinality?, 5=target, 6=label?
     const rm2 = line.match(CLASS_RELATION_RE2);
-    if (rm2 && rm2[3]) {
+    if (rm2 && rm2[5]) {
       ensureClass(rm2[1]);
-      ensureClass(rm2[3]);
-      relations.push({ id: `rel-${seenEdge++}`, source: rm2[1], target: rm2[3], type: classRelType(rm2[2]), label: rm2[4]?.trim() });
+      ensureClass(rm2[5]);
+      relations.push({
+        id: `rel-${seenEdge++}`,
+        source: rm2[1],
+        target: rm2[5],
+        type: classRelType(rm2[3]),
+        label: rm2[6]?.trim(),
+        sourceCardinality: rm2[2] || undefined,
+        targetCardinality: rm2[4] || undefined,
+      });
       continue;
     }
 
@@ -751,6 +771,7 @@ function parseState(source: string): StateModel {
   const stateMap = new Map<string, StateNode>();
   const transitions: StateTransition[] = [];
   let transCount = 0;
+  let hasCompositeStates = false;
 
   const ensureState = (id: string): StateNode => {
     if (id === "[*]") {
@@ -766,6 +787,12 @@ function parseState(source: string): StateModel {
     const line = lines[i].trim();
     if (!line || line.startsWith("%%") || line === "end" || line === "{" || line === "}") continue;
 
+    // Concurrency divider --
+    if (line === "--") {
+      hasCompositeStates = true;
+      continue;
+    }
+
     // State label: state "Label" as StateName
     const slm = line.match(/^state\s+"([^"]+)"\s+as\s+(\w+)$/);
     if (slm) {
@@ -774,12 +801,30 @@ function parseState(source: string): StateModel {
       continue;
     }
 
+    // Nested state block: state "X" { or state X {
+    const nestedM = line.match(/^state\s+(?:"[^"]+"|[\w-]+)\s*\{/);
+    if (nestedM) {
+      hasCompositeStates = true;
+      continue;
+    }
+
     // Choice/fork/join markers: state Name <<choice>>
     const choiceM = line.match(/^state\s+(\w+)\s+<<(choice|fork|join)>>$/);
     if (choiceM) {
       const node = ensureState(choiceM[1]);
       node.kind = choiceM[2] as "choice" | "fork" | "join";
+      if (choiceM[2] === "fork" || choiceM[2] === "join") hasCompositeStates = true;
       continue;
+    }
+
+    // Composite state block: state "Label" { or state Name {
+    if (line.match(/^state\s+(?:"[^"]+"|[\w-]+)\s*\{/)) {
+      hasCompositeStates = true;
+    }
+
+    // Concurrency divider inside composite state
+    if (line === "--") {
+      hasCompositeStates = true;
     }
 
     // Skip other state declarations (e.g. "state Name {")
@@ -804,7 +849,7 @@ function parseState(source: string): StateModel {
     }
   }
 
-  return { type: "stateDiagram-v2", states: [...stateMap.values()], transitions, rawLines: lines };
+  return { type: "stateDiagram-v2", states: [...stateMap.values()], transitions, hasCompositeStates: hasCompositeStates || undefined, rawLines: lines };
 }
 
 // ---------------------------------------------------------------------------
@@ -812,11 +857,13 @@ function parseState(source: string): StateModel {
 // ---------------------------------------------------------------------------
 
 function parseERCardinality(s: string): ERCardinality {
-  if (s === "||" || s === "|o") return "||";
-  if (s === "|{" || s === "}|") return "|{";
-  if (s === "o|" || s === "o{") return "o|";
-  if (s === "o{" || s === "}o") return "o{";
-  return "||";
+  switch (s) {
+    case "||": return "||";
+    case "o|": case "|o": return "o|";
+    case "|{": case "}|": return "|{";
+    case "o{": case "}o": return "o{";
+    default: return "||";
+  }
 }
 
 function parseER(source: string): ERModel {
@@ -864,18 +911,19 @@ function parseER(source: string): ERModel {
       continue;
     }
 
-    // Relationship: ENTITY_A ||--o{ ENTITY_B : label
-    const relM = line.match(/^(\w+)\s+(\|[|o{]|o[|{]|}\||}o)--(\|[|o{]|o[|{]|}\||}o)\s+(\w+)\s*:\s*(.+)$/);
+    // Relationship: ENTITY_A ||--o{ ENTITY_B : label  (-- identifying, .. non-identifying)
+    const relM = line.match(/^(\w+)\s+(\|[|o{]|o[|{]|}\||}o)(--|\.\.)(\|[|o{]|o[|{]|}\||}o)\s+(\w+)\s*:\s*(.+)$/);
     if (relM) {
       ensureEntity(relM[1]);
-      ensureEntity(relM[4]);
+      ensureEntity(relM[5]);
       relations.push({
         id: `er-${relCount++}`,
         entityA: relM[1],
-        entityB: relM[4],
+        entityB: relM[5],
         cardA: parseERCardinality(relM[2]),
-        cardB: parseERCardinality(relM[3]),
-        label: relM[5].trim(),
+        cardB: parseERCardinality(relM[4]),
+        identifying: relM[3] !== "..",
+        label: relM[6].trim(),
       });
     }
   }

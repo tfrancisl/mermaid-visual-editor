@@ -161,7 +161,9 @@ function serializeClass(model: ClassModel): string {
 
   for (const r of model.relations) {
     const label = r.label ? ` : ${r.label}` : "";
-    lines.push(`    ${r.source} ${classRelArrow(r.type)} ${r.target}${label}`);
+    const srcCard = r.sourceCardinality ? ` "${r.sourceCardinality}"` : "";
+    const tgtCard = r.targetCardinality ? ` "${r.targetCardinality}"` : "";
+    lines.push(`    ${r.source}${srcCard} ${classRelArrow(r.type)}${tgtCard} ${r.target}${label}`);
   }
 
   return lines.join("\n");
@@ -210,7 +212,8 @@ function serializeER(model: ERModel): string {
   const lines = ["erDiagram"];
 
   for (const r of model.relations) {
-    lines.push(`    ${r.entityA} ${erCardStr(r.cardA)}--${erCardStr(r.cardB)} ${r.entityB} : ${r.label}`);
+    const connector = r.identifying === false ? ".." : "--";
+    lines.push(`    ${r.entityA} ${erCardStr(r.cardA)}${connector}${erCardStr(r.cardB)} ${r.entityB} : ${r.label}`);
   }
 
   for (const ent of model.entities) {

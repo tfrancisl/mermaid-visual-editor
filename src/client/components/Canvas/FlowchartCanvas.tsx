@@ -116,7 +116,7 @@ const NODE_TYPES: NodeTypes = { mermaid: MermaidNode };
 // Helpers
 // ---------------------------------------------------------------------------
 
-function shapeForNode(shape: GraphNode["shape"]) {
+function shapeForNode(_shape: GraphNode["shape"]) {
   return "mermaid"; // single type handles all shapes via data.shape
 }
 

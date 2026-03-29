@@ -40,14 +40,51 @@ function StartEndNode({ data, selected }: NodeProps) {
 
 function NormalStateNode({ data, selected, id }: NodeProps) {
   const d = data as StateNodeData;
-  const { deleteElements } = useReactFlow();
+  const { deleteElements, setNodes: rfSetNodes } = useReactFlow();
   const ring = selected ? "ring-2 ring-[var(--accent)]" : "";
+  const [editing, setEditing] = useState(false);
+  const [editLabel, setEditLabel] = useState("");
+
+  function commitEdit(label: string) {
+    setEditing(false);
+    rfSetNodes((ns) =>
+      ns.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                label,
+                // Only update stateId if it matched label (auto-generated name)
+                stateId: (n.data as StateNodeData).stateId === (n.data as StateNodeData).label ? label : (n.data as StateNodeData).stateId,
+              },
+            }
+          : n
+      )
+    );
+  }
 
   return (
     <div className="relative group">
       <Handle type="target" position={Position.Top} className="!bg-[var(--accent)] !w-2 !h-2" />
       <div className={`flex items-center justify-center px-4 py-2 text-xs text-[var(--text-primary)] bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg min-w-[80px] ${ring}`}>
-        {d.label || d.stateId}
+        {editing ? (
+          <input
+            className="bg-transparent text-xs text-[var(--text-primary)] text-center outline-none border-b border-[var(--accent)] w-full"
+            value={editLabel}
+            onChange={(e) => setEditLabel(e.target.value)}
+            onBlur={() => commitEdit(editLabel)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
+              if (e.key === "Escape") { setEditing(false); }
+            }}
+            autoFocus
+          />
+        ) : (
+          <span onDoubleClick={() => { setEditing(true); setEditLabel(d.label || d.stateId); }}>
+            {d.label || d.stateId}
+          </span>
+        )}
       </div>
       {selected && (
         <div className="absolute -bottom-7 left-1/2 -translate-x-1/2 flex gap-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 z-10">
@@ -63,7 +100,7 @@ function NormalStateNode({ data, selected, id }: NodeProps) {
   );
 }
 
-function ChoiceNode({ data, selected }: NodeProps) {
+function ChoiceNode({ selected }: NodeProps) {
   const ring = selected ? "ring-2 ring-[var(--accent)]" : "";
   return (
     <div className={`relative ${ring}`}>
@@ -74,7 +111,7 @@ function ChoiceNode({ data, selected }: NodeProps) {
   );
 }
 
-function ForkJoinNode({ data, selected }: NodeProps) {
+function ForkJoinNode({ selected }: NodeProps) {
   const ring = selected ? "ring-2 ring-[var(--accent)]" : "";
   return (
     <div className={`relative ${ring}`}>
@@ -153,6 +190,57 @@ function flowToModel(nodes: Node[], edges: Edge[]): StateModel {
 }
 
 // ---------------------------------------------------------------------------
+// Transition label editor popover
+// ---------------------------------------------------------------------------
+
+function TransitionLabelEditor({
+  label,
+  position,
+  onClose,
+}: {
+  label: string;
+  position: { x: number; y: number };
+  onClose: (newLabel: string | null) => void;
+}) {
+  const [value, setValue] = useState(label);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const el = document.getElementById("tl-editor-popover");
+      if (el && !el.contains(e.target as globalThis.Node)) {
+        onClose(value);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [value, onClose]);
+
+  return (
+    <div
+      id="tl-editor-popover"
+      className="fixed z-50 bg-[var(--bg-secondary)] border border-[var(--border)] rounded shadow-lg px-2 py-1.5 flex items-center gap-1.5"
+      style={{ left: position.x, top: position.y - 40 }}
+    >
+      <input
+        className="field-input text-xs w-36"
+        placeholder="Transition label…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { onClose(value); }
+          if (e.key === "Escape") { onClose(null); }
+        }}
+        autoFocus
+      />
+      <button
+        className="text-xs text-[var(--accent)] hover:underline"
+        onClick={() => onClose(value)}
+      >OK</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Inner canvas
 // ---------------------------------------------------------------------------
 
@@ -162,17 +250,29 @@ function StateCanvasInner({ source, onSourceChange }: { source: string; onSource
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [syncState, setSyncState] = useState<SyncState>("idle");
+  const [isComposite, setIsComposite] = useState(false);
+  const [connectMode, setConnectMode] = useState(false);
+  const [connectSource, setConnectSource] = useState<string | null>(null);
+  const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
+  const [edgeClickPos, setEdgeClickPos] = useState<{ x: number; y: number } | null>(null);
 
   const suppressSyncRef = useRef(false);
   const ownUpdateRef = useRef(false);
   const syncTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const nodePositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
+  const { getViewport } = useReactFlow();
+
   useEffect(() => {
     if (ownUpdateRef.current) { ownUpdateRef.current = false; return; }
     const model = parse(source);
     if (model.type !== "stateDiagram-v2") return;
     const sm = model as StateModel;
+    if (sm.hasCompositeStates) {
+      setIsComposite(true);
+      return;
+    }
+    setIsComposite(false);
     const { nodes: n, edges: e } = modelToFlow(sm, nodePositionsRef.current);
     suppressSyncRef.current = true;
     setNodes(n);
@@ -214,6 +314,55 @@ function StateCanvasInner({ source, onSourceChange }: { source: string; onSource
     [setEdges]
   );
 
+  function addNewState() {
+    const count = nodes.filter((n) => (n.data as StateNodeData).kind === "normal").length;
+    const id = `State${count + 1}`;
+    const { x, y, zoom } = getViewport();
+    const position = {
+      x: (-x + window.innerWidth / 2) / zoom,
+      y: (-y + window.innerHeight / 2) / zoom,
+    };
+    setNodes((ns) => [
+      ...ns,
+      {
+        id,
+        type: "stateNormal",
+        position,
+        data: { stateId: id, label: id, kind: "normal" as const } satisfies StateNodeData,
+      },
+    ]);
+  }
+
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (!connectMode) return;
+      if (!connectSource) {
+        setConnectSource(node.id);
+      } else {
+        const id = `t-${Date.now()}`;
+        setEdges((eds) => [
+          ...eds,
+          {
+            id,
+            source: connectSource,
+            target: node.id,
+            style: { stroke: "var(--text-muted)" },
+            labelStyle: { fill: "var(--text-primary)", fontSize: 11 },
+            labelBgStyle: { fill: "var(--bg-surface)" },
+          },
+        ]);
+        setConnectSource(null);
+        setConnectMode(false);
+      }
+    },
+    [connectMode, connectSource, setEdges]
+  );
+
+  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    setEdgeClickPos({ x: event.clientX, y: event.clientY });
+    setEditingEdgeId(edge.id);
+  }, []);
+
   function syncNow() {
     clearTimeout(syncTimerRef.current);
     setSyncState("syncing");
@@ -223,10 +372,35 @@ function StateCanvasInner({ source, onSourceChange }: { source: string; onSource
     setTimeout(() => setSyncState("idle"), 400);
   }
 
+  if (isComposite) {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <div className="flex items-center gap-1 px-2 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
+          <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">State Diagram</span>
+          <span className="ml-2 text-xs text-yellow-400">(read-only)</span>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="text-sm text-[var(--text-muted)] text-center max-w-md">
+            This diagram uses composite state syntax (nested states, concurrency, or fork/join).
+            Visual editing is not available — edit in the source editor.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex flex-col h-full min-h-0">
       <div className="flex items-center gap-1 px-2 py-1.5 bg-[var(--bg-secondary)] border-b border-[var(--border)] shrink-0">
         <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">State Diagram</span>
+        <button
+          onClick={addNewState}
+          className="text-xs text-[var(--accent)] hover:underline ml-2"
+        >+ Add State</button>
+        <button
+          onClick={() => { setConnectMode(!connectMode); setConnectSource(null); }}
+          className={`text-xs hover:underline ${connectMode ? "text-yellow-400" : "text-[var(--accent)]"}`}
+        >+ Add Transition{connectMode ? " (click source, then target)" : ""}</button>
         <div className="ml-auto flex items-center gap-2">
           {syncState === "pending" && (
             <button onClick={syncNow} className="text-xs text-[var(--accent)] hover:underline">Sync now</button>
@@ -244,15 +418,38 @@ function StateCanvasInner({ source, onSourceChange }: { source: string; onSource
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeClick={onNodeClick}
+          onEdgeClick={onEdgeClick}
           nodeTypes={NODE_TYPES}
           deleteKeyCode={["Backspace", "Delete"]}
           fitView
           fitViewOptions={{ padding: 0.2 }}
-          style={{ background: "var(--bg-primary)" }}
+          style={{ background: "var(--bg-primary)", cursor: connectMode ? "crosshair" : undefined }}
         >
           <Background variant={BackgroundVariant.Dots} color="var(--border)" gap={20} size={1} />
         </ReactFlow>
       </div>
+
+      {editingEdgeId && (() => {
+        const edge = edges.find((e) => e.id === editingEdgeId);
+        if (!edge) return null;
+        return (
+          <TransitionLabelEditor
+            label={edge.label ? String(edge.label) : ""}
+            position={edgeClickPos!}
+            onClose={(newLabel) => {
+              if (newLabel !== null) {
+                setEdges((es) =>
+                  es.map((e) =>
+                    e.id === editingEdgeId ? { ...e, label: newLabel || undefined } : e
+                  )
+                );
+              }
+              setEditingEdgeId(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -328,6 +328,55 @@ describe("parseER", () => {
     expect(cust.attributes).toHaveLength(2);
     expect(cust.attributes[1].key).toBe("PK");
   });
+
+  it("parseERCardinality maps all 8 symbols correctly", () => {
+    // Test via parse() — each symbol in a real ER diagram
+    // Left-side symbols
+    const srcLl = parse("erDiagram\n    A ||--|| B : r") as ERModel;
+    expect(srcLl.relations[0].cardA).toBe("||");
+    expect(srcLl.relations[0].cardB).toBe("||");
+
+    const srcOl = parse("erDiagram\n    A o|--o| B : r") as ERModel;
+    expect(srcOl.relations[0].cardA).toBe("o|");
+    expect(srcOl.relations[0].cardB).toBe("o|");
+
+    const srcLb = parse("erDiagram\n    A |{--|{ B : r") as ERModel;
+    expect(srcLb.relations[0].cardA).toBe("|{");
+    expect(srcLb.relations[0].cardB).toBe("|{");
+
+    const srcOb = parse("erDiagram\n    A o{--o{ B : r") as ERModel;
+    expect(srcOb.relations[0].cardA).toBe("o{");
+    expect(srcOb.relations[0].cardB).toBe("o{");
+
+    // Right-side (normalized) symbols
+    const srcRl = parse("erDiagram\n    A }|--}| B : r") as ERModel;
+    expect(srcRl.relations[0].cardA).toBe("|{");
+    expect(srcRl.relations[0].cardB).toBe("|{");
+
+    const srcRo = parse("erDiagram\n    A }o--}o B : r") as ERModel;
+    expect(srcRo.relations[0].cardA).toBe("o{");
+    expect(srcRo.relations[0].cardB).toBe("o{");
+
+    // |o normalizes to o|
+    const srcIo = parse("erDiagram\n    A |o--|o B : r") as ERModel;
+    expect(srcIo.relations[0].cardA).toBe("o|");
+    expect(srcIo.relations[0].cardB).toBe("o|");
+  });
+
+  it("parses identifying relationships (--)", () => {
+    const model = parse("erDiagram\n    A ||--o{ B : has") as ERModel;
+    expect(model.relations[0].identifying).toBe(true);
+  });
+
+  it("parses non-identifying relationships (..)", () => {
+    const model = parse("erDiagram\n    A ||..o{ B : has") as ERModel;
+    expect(model.relations[0].identifying).toBe(false);
+  });
+
+  it("defaults identifying to true for -- connector", () => {
+    const model = parse("erDiagram\n    CUST ||--o{ ORDER : places") as ERModel;
+    expect(model.relations[0].identifying).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -528,6 +577,80 @@ describe("parseRequirement", () => {
     expect(model.elements[0]).toMatchObject({ name: "Test Element", type: "Simulation" });
     expect(model.relations).toHaveLength(1);
     expect(model.relations[0].type).toBe("satisfies");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// State diagram: composite state detection
+// ---------------------------------------------------------------------------
+
+describe("parseState composite detection", () => {
+  it("sets hasCompositeStates: true for nested state blocks", () => {
+    const source = `stateDiagram-v2
+    state "X" {
+        A --> B
+    }`;
+    const model = parse(source) as StateModel;
+    expect(model.hasCompositeStates).toBe(true);
+  });
+
+  it("sets hasCompositeStates: false (or undefined) for simple diagrams", () => {
+    const source = `stateDiagram-v2
+    A --> B`;
+    const model = parse(source) as StateModel;
+    expect(model.hasCompositeStates).toBeFalsy();
+  });
+
+  it("sets hasCompositeStates: true when -- concurrency divider is present", () => {
+    const source = `stateDiagram-v2
+    state Active {
+        Scanning
+        --
+        Processing
+    }`;
+    const model = parse(source) as StateModel;
+    expect(model.hasCompositeStates).toBe(true);
+  });
+
+  it("sets hasCompositeStates: true for fork/join pseudo states", () => {
+    const source = `stateDiagram-v2
+    state fork_state <<fork>>
+    [*] --> fork_state`;
+    const model = parse(source) as StateModel;
+    expect(model.hasCompositeStates).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Class diagram: cardinality parsing
+// ---------------------------------------------------------------------------
+
+describe("parseClass cardinality", () => {
+  it("parses cardinality labels on relations", () => {
+    const source = `classDiagram
+    A "1" <|-- "n" B`;
+    const model = parse(source) as ClassModel;
+    expect(model.relations).toHaveLength(1);
+    expect(model.relations[0].sourceCardinality).toBe("1");
+    expect(model.relations[0].targetCardinality).toBe("n");
+  });
+
+  it("parses cardinality with asterisk", () => {
+    const source = `classDiagram
+    A "1" --> "*" B : owns`;
+    const model = parse(source) as ClassModel;
+    expect(model.relations).toHaveLength(1);
+    expect(model.relations[0].sourceCardinality).toBe("1");
+    expect(model.relations[0].targetCardinality).toBe("*");
+    expect(model.relations[0].label).toBe("owns");
+  });
+
+  it("produces undefined cardinalities when not specified", () => {
+    const source = `classDiagram
+    A <|-- B`;
+    const model = parse(source) as ClassModel;
+    expect(model.relations[0].sourceCardinality).toBeUndefined();
+    expect(model.relations[0].targetCardinality).toBeUndefined();
   });
 });
 
