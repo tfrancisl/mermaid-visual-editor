@@ -21,7 +21,8 @@
 - DGM-V2-03: Opt-in "re-layout all nodes" action in flowchart canvas with position-loss warning — currently layout only runs on parse
 
 ## Developer Experience (v2)
-- DEV-V2-01: Shared sync guard hook — extract `suppressSyncRef`/`ownUpdateRef` pattern from canvas components into a reusable hook
+- DEV-V2-01: Canvas Sync Engine — extract `suppressSyncRef`/`ownUpdateRef`/1.5s debounce/parse-on-source-change from all 9 canvas editors into a shared `useCanvasSync<T>` hook; the 6 ReactFlow editors also duplicate `useNodesState`/`useEdgesState`/`onConnect`/toolbar wiring; currently zero canvas tests exist, and a unified hook would make sync logic independently testable
+- DEV-V2-02: Parser↔Serializer validation layer — add runtime contract enforcement between `parse()` and `serialize()` to catch silent field drops during roundtrip; currently papered over by `stripRawLines()` in roundtrip tests; could use property-based testing at the boundary
 
 ## Known Gaps / Tech Debt
 - `ERCanvas.flowToModel` hardcodes cardinalities — audit before marking ER editor production-ready

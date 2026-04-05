@@ -1,5 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { exportDiagram } from "./lib/api";
+import { useState, useCallback, useRef } from "react";
 import mermaid from "mermaid";
 import Editor, { type CursorPosition } from "./components/Editor";
 import Canvas from "./components/Canvas";
@@ -7,38 +6,16 @@ import Preview, { type ParseError } from "./components/Preview";
 import type { editor } from "monaco-editor";
 import Resizable from "./components/Resizable";
 import DiagramTypePicker from "./components/DiagramTypePicker";
-import { detectDiagramType } from "./lib/parsers";
 import { openMmdFile, saveMmdFile, saveMmdFileAs, basename } from "./lib/fileOps";
 import { getTemplate, getTemplateById } from "./lib/templates";
-import { hasServer, getSession } from "./lib/api";
-import { WatchClient } from "./lib/watchClient";
-
-// ---------------------------------------------------------------------------
-// Pane visibility
-// ---------------------------------------------------------------------------
-
-interface PaneVisibility {
-  visual: boolean;
-  source: boolean;
-  preview: boolean;
-}
-
-const PANE_STORAGE_KEY = "pane-visibility";
-
-function loadPaneVisibility(): PaneVisibility {
-  try {
-    const raw = localStorage.getItem(PANE_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return { visual: !!parsed.visual, source: !!parsed.source, preview: !!parsed.preview };
-    }
-  } catch { /* ignore */ }
-  return { visual: true, source: true, preview: false };
-}
-
-function savePaneVisibility(v: PaneVisibility) {
-  localStorage.setItem(PANE_STORAGE_KEY, JSON.stringify(v));
-}
+import { usePaneVisibility } from "./hooks/usePaneVisibility";
+import type { PaneVisibility } from "./hooks/usePaneVisibility";
+import { useTabManager, DEFAULT_SOURCE } from "./hooks/useTabManager";
+import type { Tab } from "./hooks/useTabManager";
+import { useFileWatching } from "./hooks/useFileWatching";
+import { useExport } from "./hooks/useExport";
+import type { ExportFormat } from "./hooks/useExport";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 // Initialize mermaid for on-demand SVG export
 mermaid.initialize({
@@ -49,56 +26,30 @@ mermaid.initialize({
 });
 
 // ---------------------------------------------------------------------------
-// Tab model
-// ---------------------------------------------------------------------------
-
-interface Tab {
-  id: string;
-  filePath: string | null;
-  watchedPath: string | null;
-  source: string;
-  unsaved: boolean;
-}
-
-function makeTab(source: string, filePath: string | null = null, watchedPath: string | null = null): Tab {
-  return { id: crypto.randomUUID(), filePath, watchedPath, source, unsaved: false };
-}
-
-const DEFAULT_SOURCE = getTemplate("flowchart");
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type ExportFormat = "png" | "pdf";
-
-// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
-let exportIdCounter = 0;
-
 export default function App() {
-  const [tabs, setTabs] = useState<Tab[]>(() => [makeTab(DEFAULT_SOURCE)]);
-  const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
-  const [cursor, setCursor] = useState<CursorPosition>({ line: 1, col: 1 });
-  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [parseError, setParseError] = useState<ParseError | null>(null);
+  const {
+    tabs, setTabs,
+    activeTabId, setActiveTabId,
+    activeTab, diagramType, displayName,
+    cursor, setCursor,
+    parseError, setParseError,
+    tabsRef, activeTabIdRef,
+    patchTab, activateTab, closeTab, openNewTab,
+    handleSourceChange,
+  } = useTabManager();
+
+  const {
+    exportingFormat, exportError, setExportError,
+    handleExportSVG, handleExportBinary,
+  } = useExport(activeTab.source, displayName);
+
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   // Pane visibility
-  const [panes, setPanes] = useState<PaneVisibility>(loadPaneVisibility);
-
-  function togglePane(key: keyof PaneVisibility) {
-    setPanes((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      // Don't allow all panes to be hidden — keep at least one
-      if (!next.visual && !next.source && !next.preview) return prev;
-      savePaneVisibility(next);
-      return next;
-    });
-  }
+  const { panes, togglePane } = usePaneVisibility();
 
   // Diagram type picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -108,100 +59,9 @@ export default function App() {
   // Shortcuts overlay
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  // Stable refs for keyboard handler
-  const tabsRef = useRef(tabs);
-  const activeTabIdRef = useRef(activeTabId);
-  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-  useEffect(() => { activeTabIdRef.current = activeTabId; }, [activeTabId]);
+  // File watching
+  const { watching } = useFileWatching(setTabs, setActiveTabId);
 
-  // Watching state
-  const [watching, setWatching] = useState(false);
-  const watchClientRef = useRef<WatchClient | null>(null);
-
-  // Load session from server (CLI-opened files) and set up file watching
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!await hasServer()) return;
-      const session = await getSession();
-      if (cancelled || session.files.length === 0) return;
-
-      const newTabs = session.files.map((f) => makeTab(f.content, f.path, f.path));
-      setTabs(newTabs);
-      setActiveTabId(newTabs[0].id);
-
-      // Set up file watching
-      const client = new WatchClient();
-      watchClientRef.current = client;
-      client.onFileChange((path, content) => {
-        setTabs((prev) =>
-          prev.map((t) => (t.watchedPath === path ? { ...t, source: content } : t))
-        );
-      });
-      client.connect();
-      setWatching(true);
-
-      for (const f of session.files) {
-        client.watchFile(f.path);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      watchClientRef.current?.disconnect();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-  const diagramType = detectDiagramType(activeTab.source);
-  const displayName = activeTab.filePath ? basename(activeTab.filePath) : "untitled.mmd";
-
-  // ---------------------------------------------------------------------------
-  // Tab management
-  // ---------------------------------------------------------------------------
-
-  function patchTab(id: string, patch: Partial<Tab>) {
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-  }
-
-  function activateTab(id: string) {
-    setActiveTabId(id);
-    setCursor({ line: 1, col: 1 });
-    setParseError(null);
-  }
-
-  async function closeTab(id: string) {
-    const tab = tabsRef.current.find((t) => t.id === id);
-    if (!tab) return;
-
-    // Autosave if the tab has a known file path
-    if (tab.unsaved && tab.filePath) {
-      await saveMmdFile(tab.filePath, tab.source).catch(() => {});
-    }
-
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      if (next.length === 0) {
-        // Always keep at least one tab
-        const fresh = makeTab(DEFAULT_SOURCE);
-        setActiveTabId(fresh.id);
-        return [fresh];
-      }
-      if (activeTabIdRef.current === id) {
-        const idx = prev.findIndex((t) => t.id === id);
-        const fallback = next[Math.max(0, idx - 1)];
-        setActiveTabId(fallback.id);
-      }
-      return next;
-    });
-  }
-
-  function openNewTab(source: string, filePath: string | null = null) {
-    const tab = makeTab(source, filePath);
-    setTabs((prev) => [...prev, tab]);
-    setActiveTabId(tab.id);
-    setCursor({ line: 1, col: 1 });
-    return tab;
-  }
 
   // ---------------------------------------------------------------------------
   // File operations
@@ -225,16 +85,6 @@ export default function App() {
     const path = await saveMmdFileAs(tab.source, tab.filePath ? basename(tab.filePath) : "diagram.mmd");
     if (path) patchTab(tab.id, { filePath: path, unsaved: false });
   }
-
-  // ---------------------------------------------------------------------------
-  // Source changes
-  // ---------------------------------------------------------------------------
-
-  const handleSourceChange = useCallback((value: string) => {
-    setTabs((prev) =>
-      prev.map((t) => (t.id === activeTabIdRef.current ? { ...t, source: value, unsaved: true } : t))
-    );
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Diagram type picker
@@ -272,34 +122,6 @@ export default function App() {
   }
 
   // ---------------------------------------------------------------------------
-  // Export
-  // ---------------------------------------------------------------------------
-
-  async function handleExportSVG() {
-    const trimmed = activeTab.source.trim();
-    if (!trimmed) return;
-    try {
-      const { svg } = await mermaid.render(`export-svg-${++exportIdCounter}`, trimmed);
-      downloadBlob(new Blob([svg], { type: "image/svg+xml" }), displayName.replace(/\.\w+$/, "") + ".svg");
-    } catch {
-      // Source is likely invalid — nothing to export
-    }
-  }
-
-  async function handleExportBinary(format: ExportFormat) {
-    setExportingFormat(format);
-    setExportError(null);
-    try {
-      const blob = await exportDiagram(activeTab.source, format);
-      downloadBlob(blob, displayName.replace(/\.\w+$/, "") + "." + format);
-    } catch (err) {
-      setExportError(String(err));
-    } finally {
-      setExportingFormat(null);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Jump-to-line (error banner → Monaco cursor)
   // ---------------------------------------------------------------------------
 
@@ -309,80 +131,12 @@ export default function App() {
     editorRef.current?.focus();
   }, []);
 
-  // ---------------------------------------------------------------------------
   // Keyboard shortcuts
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Don't intercept when typing in a plain input/select (except Monaco, which handles its own events)
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-
-      const mod = e.metaKey || e.ctrlKey;
-
-      if (mod && !e.shiftKey && e.key === "n") {
-        e.preventDefault();
-        openNewTab(DEFAULT_SOURCE);
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "o") {
-        e.preventDefault();
-        handleOpen();
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "s") {
-        e.preventDefault();
-        handleSave();
-        return;
-      }
-      if (mod && e.shiftKey && e.key === "S") {
-        e.preventDefault();
-        handleSaveAs();
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "w") {
-        e.preventDefault();
-        closeTab(activeTabIdRef.current);
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "Tab") {
-        e.preventDefault();
-        const t = tabsRef.current;
-        const idx = t.findIndex((x) => x.id === activeTabIdRef.current);
-        setActiveTabId(t[(idx + 1) % t.length].id);
-        return;
-      }
-      if (mod && e.shiftKey && e.key === "Tab") {
-        e.preventDefault();
-        const t = tabsRef.current;
-        const idx = t.findIndex((x) => x.id === activeTabIdRef.current);
-        setActiveTabId(t[(idx - 1 + t.length) % t.length].id);
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "1") {
-        e.preventDefault();
-        togglePane("visual");
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "2") {
-        e.preventDefault();
-        togglePane("source");
-        return;
-      }
-      if (mod && !e.shiftKey && e.key === "3") {
-        e.preventDefault();
-        togglePane("preview");
-        return;
-      }
-      if (e.key === "?" && !mod && !e.altKey) {
-        if (e.target instanceof Element && e.target.closest(".monaco-editor")) return;
-        setShowShortcuts((s) => !s);
-      }
-    };
-
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useKeyboardShortcuts({
+    openNewTab, handleOpen, handleSave, handleSaveAs,
+    closeTab, togglePane, setActiveTabId, setShowShortcuts,
+    tabsRef, activeTabIdRef, defaultSource: DEFAULT_SOURCE,
+  });
 
   // ---------------------------------------------------------------------------
   // Render
@@ -440,19 +194,6 @@ export default function App() {
       {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
     </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ---------------------------------------------------------------------------

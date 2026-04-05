@@ -1,5 +1,7 @@
 # Decisions
 
+- 2026-04-05: Parser/serializer monolith split into per-type modules under `parsers/` and `serializers/` with barrel re-exports — 1320-line file was hard to navigate and adding diagram types required editing 5 files; per-type modules isolate concerns while preserving the public `parse()`/`serialize()` API via barrel index
+- 2026-04-05: App.tsx decomposed into 5 custom hooks (`useTabManager`, `usePaneVisibility`, `useFileWatching`, `useExport`, `useKeyboardShortcuts`) — 783-line God Component was untestable; hooks follow dependency order (tab manager is core, others depend on it) with refs passed explicitly to keyboard handler to preserve the stale-closure-avoidance pattern
 - 2026-03-28: connect-mode for state transition creation uses two-click pattern instead of handle drag — handle drag conflicts with ReactFlow pan gesture on touch targets
 - 2026-03-28: `hasCompositeStates` set `undefined` (not `false`) when absent — avoids storing falsy noise in serialized model
 - 2026-03-28: `ClassEditPopover` closes and commits on Escape/outside-click; Cancel explicitly discards — `globalThis.Node` cast used for DOM `contains()` check when ReactFlow `Node` type is in scope
